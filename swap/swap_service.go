@@ -53,12 +53,14 @@ func (s *SwapService) NewSubmarineSwap(
 	payerPubKey,
 	paymentHash []byte,
 ) (*SwapPublicInfo, *SwapPrivateInfo, error) {
-	if len(payerPubKey) != 33 {
-		return nil, nil, fmt.Errorf("payerPubKey not valid")
+	err := ValidatePubKey(payerPubKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid payerPubkey: %v", err)
 	}
 
-	if len(paymentHash) != 32 {
-		return nil, nil, fmt.Errorf("paymentHash not valid")
+	err = ValidatePaymentHash(paymentHash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid paymentHash: %v", err)
 	}
 
 	// Create a new serviceKey
