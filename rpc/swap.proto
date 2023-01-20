@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package swap;
+
+option go_package = "github.com/breez/swapd/rpc";
+
+service Swap {
+    rpc InitSwap(InitSwapRequest) returns (InitSwapResponse);
+}
+
+message InitSwapRequest {
+    bytes hash = 1 [json_name = "hash"];
+    bytes pubkey = 2 [json_name = "pubkey"];
+}
+
+message InitSwapResponse {
+    string address = 1 [json_name = "address"];
+    bytes pubkey = 2 [json_name = "pubkey"];
+    uint32 lock_time = 3 [json_name = "lock_time"];
+}
