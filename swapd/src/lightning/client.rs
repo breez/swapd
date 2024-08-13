@@ -1,5 +1,8 @@
 #[derive(Debug)]
-pub enum PayError {}
+pub enum PayError {
+    ConnectionFailed,
+    InvalidPreimage,
+}
 
 #[async_trait::async_trait]
 pub trait LightningClient {

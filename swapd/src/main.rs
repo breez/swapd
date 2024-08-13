@@ -7,7 +7,7 @@ use server::{
     swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
     SwapServerParams, SwapService,
 };
-use tonic::transport::Server;
+use tonic::transport::{Server, Uri};
 
 mod chain;
 mod cln;
@@ -49,6 +49,9 @@ struct Args {
     /// Amount of satoshis below which an output is considered dust.
     #[arg(long, default_value = "546")]
     pub dust_limit_sat: u64,
+
+    /// Address to the cln grpc api.
+    pub cln_grpc_address: Uri,
 }
 
 #[tokio::main]
@@ -62,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.dust_limit_sat,
     ));
     let block_list = Arc::new(BlockListImpl::new());
-    let cln_client = Arc::new(cln::Client::new());
+    let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
     let swap_repository = Arc::new(postgresql::SwapRepository::new());
     let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
     fee_estimator.start().await?;
