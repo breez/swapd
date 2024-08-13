@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bitcoin::Network;
-use chain::BlockListImpl;
+use chain::{whatthefee::WhatTheFeeEstimator, BlockListImpl};
 use clap::Parser;
 use server::{
     swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
@@ -64,7 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let block_list = Arc::new(BlockListImpl::new());
     let cln_client = Arc::new(cln::Client::new());
     let swap_repository = Arc::new(postgresql::SwapRepository::new());
-    let fee_estimator = Arc::new(chain::whatthefee::WhatTheFeeEstimator::new());
+    let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
+    fee_estimator.start().await?;
     let swapper_server = SwapperServer::new(SwapServer::new(
         &SwapServerParams {
             network: args.network,

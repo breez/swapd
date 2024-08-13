@@ -4,6 +4,7 @@ pub struct FeeEstimate {
 
 #[derive(Debug)]
 pub enum FeeEstimateError {
+    Unavailable,
     General(Box<dyn std::error::Error>),
 }
 

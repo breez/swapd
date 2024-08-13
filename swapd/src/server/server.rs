@@ -328,6 +328,7 @@ impl From<FeeEstimateError> for Status {
     fn from(value: FeeEstimateError) -> Self {
         match value {
             FeeEstimateError::General(_) => Status::internal("internal error"),
+            FeeEstimateError::Unavailable => Status::internal("internal error"),
         }
     }
 }
