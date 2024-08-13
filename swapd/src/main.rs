@@ -1,0 +1,89 @@
+use std::sync::Arc;
+
+use bitcoin::Network;
+use chain::BlockListImpl;
+use clap::Parser;
+use server::{
+    swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
+    SwapServerParams, SwapService,
+};
+use tonic::transport::Server;
+
+mod chain;
+mod cln;
+mod lightning;
+mod postgresql;
+mod server;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Address the grpc server will listen on.
+    #[arg(short, long)]
+    pub address: core::net::SocketAddr,
+
+    /// Maximum amount allowed for swaps.
+    #[arg(long, default_value = "4_000_000")]
+    pub max_swap_amount_sat: u64,
+
+    /// Locktime for swaps. This is the time between confirmation of the swap
+    /// until the client can get a refund.
+    #[arg(long, default_value = "288")]
+    pub lock_time: u32,
+
+    /// Minimum number of confirmations required before a swap is eligible for
+    /// payout.
+    #[arg(long, default_value = "1")]
+    pub min_confirmations: u32,
+
+    /// Minimum number of blocks needed to redeem a utxo onchain. A utxo is no
+    /// longer eligible for payout when the lock time left is less than this
+    /// number.
+    #[arg(long, default_value = "72")]
+    pub min_redeem_blocks: u32,
+
+    /// Bitcoin network. Valid values are bitcoin, testnet, signet, regtest.
+    #[arg(long, default_value = "bitcoin")]
+    pub network: Network,
+
+    /// Amount of satoshis below which an output is considered dust.
+    #[arg(long, default_value = "546")]
+    pub dust_limit_sat: u64,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    let privkey_provider = RandomPrivateKeyProvider::new(args.network);
+    let swap_service = Arc::new(SwapService::new(
+        args.network,
+        privkey_provider,
+        args.lock_time,
+        args.dust_limit_sat,
+    ));
+    let block_list = Arc::new(BlockListImpl::new());
+    let cln_client = Arc::new(cln::Client::new());
+    let swap_repository = Arc::new(postgresql::SwapRepository::new());
+    let fee_estimator = Arc::new(chain::whatthefee::WhatTheFeeEstimator::new());
+    let swapper_server = SwapperServer::new(SwapServer::new(
+        &SwapServerParams {
+            network: args.network,
+            max_swap_amount_sat: args.max_swap_amount_sat,
+            min_confirmations: args.min_confirmations,
+            min_redeem_blocks: args.min_redeem_blocks,
+        },
+        Arc::clone(&block_list),
+        Arc::clone(&cln_client),
+        Arc::clone(&cln_client),
+        Arc::clone(&swap_service),
+        Arc::clone(&swap_repository),
+        Arc::clone(&fee_estimator),
+    ));
+
+    Server::builder()
+        .add_service(swapper_server)
+        .serve(args.address)
+        .await?;
+
+    Ok(())
+}

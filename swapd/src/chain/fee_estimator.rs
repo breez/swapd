@@ -1,0 +1,13 @@
+pub struct FeeEstimate {
+    pub sat_per_kw: u32,
+}
+
+#[derive(Debug)]
+pub enum FeeEstimateError {
+    General(Box<dyn std::error::Error>),
+}
+
+#[async_trait::async_trait]
+pub trait FeeEstimator {
+    async fn estimate_fee(&self, conf_target: i32) -> Result<FeeEstimate, FeeEstimateError>;
+}
