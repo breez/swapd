@@ -10,18 +10,20 @@ use crate::chain::{FeeEstimate, FeeEstimateError, FeeEstimator};
 
 const STALE_SECONDS: u64 = 60 * 12;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct WhatTheFeeResponse {
     index: Vec<i32>,
     columns: Vec<String>,
     data: Vec<Vec<i32>>,
 }
 
+#[derive(Debug)]
 struct LastResponse {
     timestamp: SystemTime,
     response: WhatTheFeeResponse,
 }
 
+#[derive(Debug)]
 pub struct WhatTheFeeEstimator {
     lock_time: u32,
     last_response: Arc<Mutex<Option<LastResponse>>>,

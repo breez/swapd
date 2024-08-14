@@ -1,4 +1,4 @@
-use bitcoin::{hashes::sha256, Address};
+use bitcoin::{hashes::sha256, Address, Txid};
 
 use crate::chain::Utxo;
 
@@ -34,7 +34,7 @@ pub enum AddressStatus {
 }
 
 pub struct TxInfo {
-    pub tx: Vec<u8>,
+    pub tx: Txid,
     pub amount: u64,
 }
 

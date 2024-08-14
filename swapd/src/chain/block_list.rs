@@ -8,6 +8,7 @@ pub trait BlockListService {
     ) -> Result<Vec<Utxo>, Box<dyn std::error::Error>>;
 }
 
+#[derive(Debug)]
 pub struct BlockListImpl {}
 
 impl BlockListImpl {

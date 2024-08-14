@@ -8,6 +8,7 @@ use bitcoin::{
     Address, Network, PrivateKey, PublicKey, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
     Weight, Witness,
 };
+use tracing::{debug, field, instrument, trace};
 
 use crate::chain::{FeeEstimate, Utxo};
 
@@ -16,11 +17,13 @@ use super::privkey_provider::PrivateKeyProvider;
 // TODO: Verify this size
 const REDEEM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
 
+#[derive(Debug)]
 pub struct Swap {
     pub public: SwapPublicData,
     pub private: SwapPrivateData,
 }
 
+#[derive(Debug)]
 pub struct SwapPublicData {
     pub payer_pubkey: PublicKey,
     pub swapper_pubkey: PublicKey,
@@ -34,10 +37,20 @@ pub struct SwapPrivateData {
     pub swapper_privkey: PrivateKey,
 }
 
+impl std::fmt::Debug for SwapPrivateData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SwapPrivateData")
+            .field("swapper_privkey", &"redacted")
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 pub enum CreateSwapError {
     PrivateKeyError,
 }
 
+#[derive(Debug)]
 pub enum CreateRedeemTxError {
     InvalidBlockHeight,
     InvalidWeight,
@@ -48,6 +61,7 @@ pub enum CreateRedeemTxError {
     AmountTooLow,
 }
 
+#[derive(Debug)]
 pub struct SwapService<P>
 where
     P: PrivateKeyProvider,
@@ -78,15 +92,16 @@ where
         }
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn create_swap(
         &self,
         payer_pubkey: PublicKey,
         hash: sha256::Hash,
     ) -> Result<Swap, CreateSwapError> {
-        let swapper_privkey = self
-            .privkey_provider
-            .new_private_key()
-            .map_err(|_| CreateSwapError::PrivateKeyError)?;
+        let swapper_privkey = self.privkey_provider.new_private_key().map_err(|e| {
+            debug!("error creating private key: {:?}", e);
+            CreateSwapError::PrivateKeyError
+        })?;
         let swapper_pubkey = swapper_privkey.public_key(&self.secp);
 
         let lock_time = self.lock_time;
@@ -121,6 +136,7 @@ where
         })
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn create_redeem_tx(
         &self,
         swap: &Swap,
@@ -159,6 +175,12 @@ where
         let fee_sat = (fee_msat + 999) / 1000;
         let value_after_fees_sat = total_value.saturating_sub(fee_sat);
         if value_after_fees_sat < self.dust_limit_sat {
+            trace!(
+                total_value,
+                fee_sat,
+                value_after_fees_sat,
+                dust_limit_sat = self.dust_limit_sat
+            );
             return Err(CreateRedeemTxError::AmountTooLow);
         }
         tx.output[0].value = value_after_fees_sat;
@@ -208,6 +230,7 @@ impl From<sighash::Error> for CreateRedeemTxError {
 
 impl From<bitcoin::secp256k1::Error> for CreateRedeemTxError {
     fn from(value: bitcoin::secp256k1::Error) -> Self {
+        trace!(secp256k1_error = field::debug(value));
         match value {
             bitcoin::secp256k1::Error::IncorrectSignature => todo!(),
             bitcoin::secp256k1::Error::InvalidMessage => CreateRedeemTxError::InvalidMessage,

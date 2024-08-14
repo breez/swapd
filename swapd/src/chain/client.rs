@@ -1,5 +1,6 @@
 use bitcoin::OutPoint;
 
+#[derive(Debug)]
 pub struct Utxo {
     pub block_height: u32,
     pub outpoint: OutPoint,

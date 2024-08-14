@@ -8,7 +8,8 @@ use server::{
     SwapServerParams, SwapService,
 };
 use tonic::transport::{Server, Uri};
-
+use tracing::{field, info};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 mod chain;
 mod cln;
 mod lightning;
@@ -51,12 +52,22 @@ struct Args {
     pub dust_limit_sat: u64,
 
     /// Address to the cln grpc api.
+    #[arg(long)]
     pub cln_grpc_address: Uri,
+
+    /// Loglevel to use. Can be used to filter loges through the env filter
+    /// format.
+    #[arg(long, default_value = "info")]
+    pub log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    tracing_subscriber::registry()
+        .with(EnvFilter::new(args.log_level))
+        .init();
+
     let privkey_provider = RandomPrivateKeyProvider::new(args.network);
     let swap_service = Arc::new(SwapService::new(
         args.network,
@@ -84,6 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&fee_estimator),
     ));
 
+    info!(
+        address = field::display(&args.address),
+        "Starting swapper server"
+    );
     Server::builder()
         .add_service(swapper_server)
         .serve(args.address)

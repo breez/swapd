@@ -5,6 +5,7 @@ pub trait PrivateKeyProvider {
     fn new_private_key(&self) -> Result<PrivateKey, Box<dyn std::error::Error>>;
 }
 
+#[derive(Debug)]
 pub struct RandomPrivateKeyProvider {
     rnd: SystemRandom,
     network: Network,

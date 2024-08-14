@@ -1,11 +1,12 @@
-use std::sync::Arc;
-
 use bitcoin::{
     hashes::{sha256::Hash, Hash as _},
     Address, Network, PublicKey,
 };
 use lightning_invoice::Bolt11Invoice;
+use std::fmt::Debug;
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
+use tracing::{debug, error, field, instrument, trace, warn};
 
 use crate::{
     chain::{BlockListService, ChainClient, ChainError, FeeEstimateError, FeeEstimator, Utxo},
@@ -31,6 +32,7 @@ pub struct SwapServerParams {
     pub min_redeem_blocks: u32,
 }
 
+#[derive(Debug)]
 pub struct SwapServer<B, C, L, P, R, F>
 where
     B: BlockListService,
@@ -87,31 +89,33 @@ where
 #[tonic::async_trait]
 impl<B, C, L, P, R, F> Swapper for SwapServer<B, C, L, P, R, F>
 where
-    B: BlockListService + Send + Sync + 'static,
-    C: ChainClient + Send + Sync + 'static,
-    L: LightningClient + Send + Sync + 'static,
-    P: PrivateKeyProvider + Send + Sync + 'static,
-    R: SwapRepository + Send + Sync + 'static,
-    F: FeeEstimator + Send + Sync + 'static,
+    B: BlockListService + Debug + Send + Sync + 'static,
+    C: ChainClient + Debug + Send + Sync + 'static,
+    L: LightningClient + Debug + Send + Sync + 'static,
+    P: PrivateKeyProvider + Debug + Send + Sync + 'static,
+    R: SwapRepository + Debug + Send + Sync + 'static,
+    F: FeeEstimator + Debug + Send + Sync + 'static,
 {
+    #[instrument(skip(self), level = "debug")]
     async fn add_fund_init(
         &self,
         request: Request<AddFundInitRequest>,
     ) -> Result<Response<AddFundInitReply>, Status> {
+        debug!("add_fund_init request");
         let req = request.into_inner();
         // TODO: Return this error in error message?
-        let payer_pubkey = PublicKey::from_slice(&req.pubkey)
-            .map_err(|_| Status::invalid_argument("invalid pubkey"))?;
+        let payer_pubkey = PublicKey::from_slice(&req.pubkey).map_err(|_| {
+            trace!("got invalid pubkey");
+            Status::invalid_argument("invalid pubkey")
+        })?;
         // TODO: Return this error in error message?
-        let hash =
-            Hash::from_slice(&req.hash).map_err(|_| Status::invalid_argument("invalid hash"))?;
+        let hash = Hash::from_slice(&req.hash).map_err(|_| {
+            trace!("got invalid hash");
+            Status::invalid_argument("invalid hash")
+        })?;
 
         // Get a fee estimate for the next block to account for worst case fees.
-        let fee_estimate = self
-            .fee_estimator
-            .estimate_fee(1)
-            .await
-            .map_err(|_| Status::internal("internal error"))?;
+        let fee_estimate = self.fee_estimator.estimate_fee(1).await?;
 
         // Assume a weight of 1000 for the transaction
         let min_allowed_deposit = fee_estimate.sat_per_kw.saturating_mul(3) / 2;
@@ -121,7 +125,7 @@ where
 
         Ok(Response::new(AddFundInitReply {
             address: swap.public.address.to_string(),
-            error_message: String::from(""),
+            error_message: String::default(),
             lock_height: swap.public.lock_time as i64,
             max_allowed_deposit: self.max_swap_amount_sat as i64,
             min_allowed_deposit: min_allowed_deposit as i64,
@@ -129,10 +133,12 @@ where
         }))
     }
 
+    #[instrument(skip(self), level = "debug")]
     async fn add_fund_status(
         &self,
         request: Request<AddFundStatusRequest>,
     ) -> Result<Response<AddFundStatusReply>, Status> {
+        debug!("add_fund_status request");
         let req = request.into_inner();
         let addresses = req
             .addresses
@@ -140,11 +146,17 @@ where
             .map(|a| {
                 let a = match a.parse::<Address<_>>() {
                     Ok(a) => a,
-                    Err(_) => return Err(Status::invalid_argument("invalid address")),
+                    Err(e) => {
+                        trace!("got invalid address: {:?}", e);
+                        return Err(Status::invalid_argument("invalid address"));
+                    }
                 };
                 let a = match a.require_network(self.network) {
                     Ok(a) => a,
-                    Err(_) => return Err(Status::invalid_argument("invalid address")),
+                    Err(_) => {
+                        trace!("got invalid address (invalid network)");
+                        return Err(Status::invalid_argument("invalid address"));
+                    }
                 };
                 Ok(a)
             })
@@ -153,7 +165,10 @@ where
             .swap_repository
             .get_state(addresses)
             .await
-            .map_err(|_| Status::internal("internal error"))?;
+            .map_err(|e| {
+                error!("failed to get swap state: {:?}", e);
+                Status::internal("internal error")
+            })?;
         Ok(Response::new(AddFundStatusReply {
             statuses: states
                 .into_iter()
@@ -162,7 +177,7 @@ where
                         AddressStatus::Unknown => swap_api::AddressStatus::default(),
                         AddressStatus::Mempool { tx_info } => swap_api::AddressStatus {
                             amount: tx_info.amount as i64,
-                            tx: hex::encode(&tx_info.tx),
+                            tx: tx_info.tx.to_string(),
                             ..Default::default()
                         },
                         AddressStatus::Confirmed {
@@ -171,7 +186,7 @@ where
                             tx_info,
                         } => swap_api::AddressStatus {
                             amount: tx_info.amount as i64,
-                            tx: hex::encode(&tx_info.tx),
+                            tx: tx_info.tx.to_string(),
                             block_hash: block_hash.to_string(),
                             confirmed: true,
                         },
@@ -183,29 +198,42 @@ where
         }))
     }
 
+    #[instrument(skip(self), level = "debug")]
     async fn get_swap_payment(
         &self,
         request: Request<GetSwapPaymentRequest>,
     ) -> Result<Response<GetSwapPaymentReply>, Status> {
+        debug!("get_swap_payment request");
         let req = request.into_inner();
-        let invoice: Bolt11Invoice = req
-            .payment_request
-            .parse()
-            .map_err(|_| Status::invalid_argument("invalid payment request"))?;
+        let invoice: Bolt11Invoice = req.payment_request.parse().map_err(|e| {
+            trace!("got invalid payment request: {:?}", e);
+            Status::invalid_argument("invalid payment request")
+        })?;
 
         let amount_msat = match invoice.amount_milli_satoshis() {
             Some(amount_msat) => amount_msat,
-            None => return Err(Status::invalid_argument("invoice must have an amount")),
+            None => {
+                trace!("got payment request without amount");
+                return Err(Status::invalid_argument(
+                    "payment request must have an amount",
+                ));
+            }
         };
 
         let amount_sat = amount_msat / 1000;
         if amount_sat * 1000 != amount_msat {
+            trace!(amount_msat, "invoice amount is not a round sat amount");
             return Err(Status::invalid_argument(
                 "invoice amount must be a round satoshi amount",
             ));
         }
 
         if amount_sat > self.max_swap_amount_sat {
+            trace!(
+                amount_sat,
+                max_swap_amount_sat = self.max_swap_amount_sat,
+                "invoice amount exceeds max swap amount"
+            );
             return Err(Status::invalid_argument(
                 "amount exceeds maximum allowed deposit",
             ));
@@ -216,6 +244,7 @@ where
             .get_swap_state_by_hash(invoice.payment_hash())
             .await?;
         if swap_state.utxos.is_empty() {
+            trace!("swap has no utxos");
             return Err(Status::failed_precondition("no utxos found"));
         }
 
@@ -231,25 +260,50 @@ where
             .filter(|utxo| {
                 let confirmations = current_height.saturating_sub(utxo.block_height);
                 if confirmations < self.min_confirmations {
+                    debug!(
+                        outpoint = field::display(utxo.outpoint),
+                        confirmations,
+                        min_confirmations = self.min_confirmations,
+                        "utxo has less than min confirmations"
+                    );
                     return false;
                 }
 
                 if confirmations > max_confirmations {
+                    debug!(
+                        outpoint = field::display(utxo.outpoint),
+                        confirmations, max_confirmations, "utxo has more than max confirmations"
+                    );
                     return false;
                 }
 
+                trace!(
+                    outpoint = field::display(utxo.outpoint),
+                    confirmations,
+                    min_confirmations = self.min_confirmations,
+                    max_confirmations,
+                    "utxo has correct amount of confirmations"
+                );
                 true
             })
             .collect::<Vec<Utxo>>();
 
         let utxos = match self.block_list_service.filter_blocklisted(&utxos).await {
             Ok(utxos) => utxos,
-            Err(_) => utxos,
+            Err(e) => {
+                error!("failed to filter blocklisted utxos: {:?}", e);
+                utxos
+            }
         };
 
         // TODO: Add ability to charge a fee?
         let amount_sum_sat = utxos.iter().fold(0u64, |sum, utxo| sum + utxo.amount_sat);
         if amount_sum_sat != amount_sat {
+            trace!(
+                amount_sum_sat,
+                amount_sat,
+                "utxo values don't match invoice value"
+            );
             return Err(Status::failed_precondition(
                 "confirmed utxo values don't match invoice value",
             ));
@@ -257,10 +311,16 @@ where
 
         let fee_estimate = self.fee_estimator.estimate_fee(6).await?;
         let fake_address = Address::p2wpkh(
-            &PublicKey::from_slice(&[0x04; 33]).map_err(|_| Status::internal("internal error"))?,
+            &PublicKey::from_slice(&[0x04; 33]).map_err(|e| {
+                error!("failed to create fake pubkey: {:?}", e);
+                Status::internal("internal error")
+            })?,
             self.network,
         )
-        .map_err(|_| Status::internal("internal error"))?;
+        .map_err(|e| {
+            error!("failed to create fake address: {:?}", e);
+            Status::internal("internal error")
+        })?;
 
         // If the redeem tx can be created, this is a valid swap.
         self.swap_service
@@ -272,7 +332,10 @@ where
                 &FAKE_PREIMAGE,
                 fake_address,
             )
-            .map_err(|_| Status::failed_precondition("value too low"))?;
+            .map_err(|e| {
+                debug!("could not create valid fake redeem tx: {:?}", e);
+                Status::failed_precondition("value too low")
+            })?;
 
         // TODO: Insert payment?
 
@@ -283,7 +346,14 @@ where
             .await
         {
             Ok(_) => {}
-            Err(_) => todo!("log error"),
+            Err(e) => {
+                error!(
+                    hash = field::display(swap_state.swap.public.hash),
+                    preimage = hex::encode(preimage),
+                    "failed to persist preimage: {:?}",
+                    e
+                );
+            }
         };
 
         Ok(Response::new(GetSwapPaymentReply::default()))
@@ -293,8 +363,14 @@ where
 impl From<SwapPersistenceError> for Status {
     fn from(value: SwapPersistenceError) -> Self {
         match value {
-            SwapPersistenceError::AlreadyExists => Status::already_exists("Hash already exists"),
-            SwapPersistenceError::General(_) => Status::internal("internal error"),
+            SwapPersistenceError::AlreadyExists => {
+                trace!("swap already exists");
+                Status::already_exists("Hash already exists")
+            }
+            SwapPersistenceError::General(e) => {
+                error!("failed to persist swap: {:?}", e);
+                Status::internal("internal error")
+            }
         }
     }
 }
@@ -302,8 +378,14 @@ impl From<SwapPersistenceError> for Status {
 impl From<GetSwapError> for Status {
     fn from(value: GetSwapError) -> Self {
         match value {
-            GetSwapError::NotFound => Status::not_found("swap not found"),
-            GetSwapError::General(_) => Status::internal("internal error"),
+            GetSwapError::NotFound => {
+                trace!("swap not found");
+                Status::not_found("swap not found")
+            }
+            GetSwapError::General(e) => {
+                error!("failed to get swap: {:?}", e);
+                Status::internal("internal error")
+            }
         }
     }
 }
@@ -311,7 +393,10 @@ impl From<GetSwapError> for Status {
 impl From<CreateSwapError> for Status {
     fn from(value: CreateSwapError) -> Self {
         match value {
-            CreateSwapError::PrivateKeyError => Status::internal("internal error"),
+            CreateSwapError::PrivateKeyError => {
+                error!("failed to create swap due to private key error.");
+                Status::internal("internal error")
+            }
         }
     }
 }
@@ -319,7 +404,10 @@ impl From<CreateSwapError> for Status {
 impl From<ChainError> for Status {
     fn from(value: ChainError) -> Self {
         match value {
-            ChainError::General(_) => Status::internal("internal error"),
+            ChainError::General(e) => {
+                error!("failed to access chain client: {:?}", e);
+                Status::internal("internal error")
+            }
         }
     }
 }
@@ -327,14 +415,21 @@ impl From<ChainError> for Status {
 impl From<FeeEstimateError> for Status {
     fn from(value: FeeEstimateError) -> Self {
         match value {
-            FeeEstimateError::General(_) => Status::internal("internal error"),
-            FeeEstimateError::Unavailable => Status::internal("internal error"),
+            FeeEstimateError::General(e) => {
+                error!("failed to estimate fee: {:?}", e);
+                Status::internal("internal error")
+            }
+            FeeEstimateError::Unavailable => {
+                warn!("fee estimate is unavailable");
+                Status::internal("internal error")
+            }
         }
     }
 }
 
 impl From<PayError> for Status {
-    fn from(_value: PayError) -> Self {
+    fn from(value: PayError) -> Self {
+        debug!("payment failed: {:?}", value);
         Status::unknown("payment failed")
     }
 }

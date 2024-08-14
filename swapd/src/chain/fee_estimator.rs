@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct FeeEstimate {
     pub sat_per_kw: u32,
 }
