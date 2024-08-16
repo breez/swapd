@@ -9,7 +9,8 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, field, instrument, trace, warn};
 
 use crate::{
-    chain::{BlockListService, ChainClient, ChainError, FeeEstimateError, FeeEstimator, Utxo},
+    chain::{ChainClient, ChainError, FeeEstimateError, FeeEstimator, Utxo},
+    chain_filter::ChainFilterService,
     lightning::{LightningClient, PayError},
 };
 
@@ -33,10 +34,10 @@ pub struct SwapServerParams {
 }
 
 #[derive(Debug)]
-pub struct SwapServer<B, C, L, P, R, F>
+pub struct SwapServer<C, CF, L, P, R, F>
 where
-    B: BlockListService,
     C: ChainClient,
+    CF: ChainFilterService,
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
@@ -46,18 +47,18 @@ where
     max_swap_amount_sat: u64,
     min_confirmations: u32,
     min_redeem_blocks: u32,
-    block_list_service: Arc<B>,
     chain_service: Arc<C>,
+    chain_filter_service: Arc<CF>,
     lightning_client: Arc<L>,
     swap_service: Arc<SwapService<P>>,
     swap_repository: Arc<R>,
     fee_estimator: Arc<F>,
 }
 
-impl<B, C, L, P, R, F> SwapServer<B, C, L, P, R, F>
+impl<C, CF, L, P, R, F> SwapServer<C, CF, L, P, R, F>
 where
-    B: BlockListService,
     C: ChainClient,
+    CF: ChainFilterService,
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
@@ -65,8 +66,8 @@ where
 {
     pub fn new(
         params: &SwapServerParams,
-        block_list_service: Arc<B>,
         chain_service: Arc<C>,
+        chain_filter_service: Arc<CF>,
         lightning_client: Arc<L>,
         swap_service: Arc<SwapService<P>>,
         swap_repository: Arc<R>,
@@ -77,8 +78,8 @@ where
             min_confirmations: params.min_confirmations,
             min_redeem_blocks: params.min_redeem_blocks,
             max_swap_amount_sat: params.max_swap_amount_sat,
-            block_list_service,
             chain_service,
+            chain_filter_service,
             lightning_client,
             swap_service,
             swap_repository,
@@ -87,10 +88,10 @@ where
     }
 }
 #[tonic::async_trait]
-impl<B, C, L, P, R, F> Swapper for SwapServer<B, C, L, P, R, F>
+impl<C, CF, L, P, R, F> Swapper for SwapServer<C, CF, L, P, R, F>
 where
-    B: BlockListService + Debug + Send + Sync + 'static,
     C: ChainClient + Debug + Send + Sync + 'static,
+    CF: ChainFilterService + Debug + Send + Sync + 'static,
     L: LightningClient + Debug + Send + Sync + 'static,
     P: PrivateKeyProvider + Debug + Send + Sync + 'static,
     R: SwapRepository + Debug + Send + Sync + 'static,
@@ -288,10 +289,10 @@ where
             })
             .collect::<Vec<Utxo>>();
 
-        let utxos = match self.block_list_service.filter_blocklisted(&utxos).await {
+        let utxos = match self.chain_filter_service.filter_utxos(&utxos).await {
             Ok(utxos) => utxos,
             Err(e) => {
-                error!("failed to filter blocklisted utxos: {:?}", e);
+                error!("failed to filter utxos: {:?}", e);
                 utxos
             }
         };

@@ -1,3 +1,4 @@
+use bitcoin::{Address, OutPoint};
 use tonic::{transport::Uri, Request};
 use tracing::{debug, error, instrument, warn};
 
@@ -59,6 +60,10 @@ impl LightningClient for Client {
 #[async_trait::async_trait]
 impl ChainClient for Client {
     async fn get_blockheight(&self) -> Result<u32, ChainError> {
+        todo!()
+    }
+
+    async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError> {
         todo!()
     }
 }

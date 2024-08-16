@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use bitcoin::Network;
-use chain::{whatthefee::WhatTheFeeEstimator, BlockListImpl};
+use chain::whatthefee::WhatTheFeeEstimator;
+use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use server::{
     swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
@@ -11,6 +12,7 @@ use tonic::transport::{Server, Uri};
 use tracing::{field, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 mod chain;
+mod chain_filter;
 mod cln;
 mod lightning;
 mod postgresql;
@@ -75,9 +77,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.lock_time,
         args.dust_limit_sat,
     ));
-    let block_list = Arc::new(BlockListImpl::new());
+
     let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
     let swap_repository = Arc::new(postgresql::SwapRepository::new());
+    let chain_filter_repository = Arc::new(postgresql::ChainFilterRepository::new());
+    let chain_filter = Arc::new(ChainFilterImpl::new(
+        Arc::clone(&cln_client),
+        Arc::clone(&chain_filter_repository),
+    ));
     let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
     fee_estimator.start().await?;
     let swapper_server = SwapperServer::new(SwapServer::new(
@@ -87,8 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_confirmations: args.min_confirmations,
             min_redeem_blocks: args.min_redeem_blocks,
         },
-        Arc::clone(&block_list),
         Arc::clone(&cln_client),
+        Arc::clone(&chain_filter),
         Arc::clone(&cln_client),
         Arc::clone(&swap_service),
         Arc::clone(&swap_repository),
