@@ -23,7 +23,7 @@ mod server;
 #[command(version, about, long_about = None)]
 struct Args {
     /// Address the grpc server will listen on.
-    #[arg(short, long)]
+    #[arg(long)]
     pub address: core::net::SocketAddr,
 
     /// Maximum amount allowed for swaps.
