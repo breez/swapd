@@ -11,7 +11,7 @@ use tracing::{instrument, trace};
 
 use crate::{
     chain::Utxo,
-    server::{
+    public_server::{
         self, AddPreimageError, AddressState, GetSwapError, Swap, SwapPersistenceError,
         SwapPrivateData, SwapPublicData, SwapState,
     },
@@ -30,7 +30,7 @@ impl SwapRepository {
 }
 
 #[async_trait::async_trait]
-impl server::SwapRepository for SwapRepository {
+impl public_server::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError> {
         sqlx::query(

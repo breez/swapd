@@ -4,7 +4,7 @@ use bitcoin::Network;
 use chain::whatthefee::WhatTheFeeEstimator;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
-use server::{
+use public_server::{
     swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
     SwapServerParams, SwapService,
 };
@@ -17,7 +17,7 @@ mod chain_filter;
 mod cln;
 mod lightning;
 mod postgresql;
-mod server;
+mod public_server;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
