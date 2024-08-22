@@ -1,8 +1,9 @@
-use bitcoin::{Address, OutPoint};
+use bitcoin::{hashes::sha256, Address, OutPoint};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
 pub struct Utxo {
+    pub block_hash: sha256::Hash,
     pub block_height: u32,
     pub outpoint: OutPoint,
     pub amount_sat: u64,

@@ -8,6 +8,7 @@ use server::{
     swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
     SwapServerParams, SwapService,
 };
+use sqlx::PgPool;
 use tonic::transport::{Server, Uri};
 use tracing::{field, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -61,6 +62,10 @@ struct Args {
     /// format.
     #[arg(long, default_value = "info")]
     pub log_level: String,
+
+    /// Connectionstring to the postgres database.
+    #[arg(long)]
+    pub db_url: String,
 }
 
 #[tokio::main]
@@ -79,7 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
-    let swap_repository = Arc::new(postgresql::SwapRepository::new());
+    let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
+    let swap_repository = Arc::new(postgresql::SwapRepository::new(pgpool, args.network));
     let chain_filter_repository = Arc::new(postgresql::ChainFilterRepository::new());
     let chain_filter = Arc::new(ChainFilterImpl::new(
         Arc::clone(&cln_client),

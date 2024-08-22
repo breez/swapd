@@ -170,6 +170,8 @@ where
                 error!("failed to get swap state: {:?}", e);
                 Status::internal("internal error")
             })?;
+
+        // TODO: addresses could have multiple utxos.
         Ok(Response::new(AddFundStatusReply {
             statuses: states
                 .into_iter()

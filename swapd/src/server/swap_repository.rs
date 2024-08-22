@@ -11,6 +11,12 @@ pub enum SwapPersistenceError {
 }
 
 #[derive(Debug)]
+pub enum AddPreimageError {
+    DoesNotExist,
+    General(Box<dyn std::error::Error>),
+}
+
+#[derive(Debug)]
 pub enum GetSwapError {
     NotFound,
     General(Box<dyn std::error::Error>),
@@ -46,11 +52,7 @@ pub struct SwapState {
 #[async_trait::async_trait]
 pub trait SwapRepository {
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError>;
-    async fn add_preimage(
-        &self,
-        swap: &Swap,
-        preimage: &[u8; 32],
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    async fn add_preimage(&self, swap: &Swap, preimage: &[u8; 32]) -> Result<(), AddPreimageError>;
     async fn get_swap_state_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
     async fn get_state(
         &self,
