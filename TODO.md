@@ -1,1 +1,2 @@
 - [ ] redeem logic
+- [ ] address the single-utxo model in add_fund_status
