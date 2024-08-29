@@ -5,7 +5,7 @@ use bitcoin::{
     Address, Network,
 };
 use tonic::{Request, Response, Status};
-use tracing::{debug, instrument, warn};
+use tracing::{instrument, warn};
 
 use crate::chain_filter::ChainFilterRepository;
 

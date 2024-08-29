@@ -55,7 +55,6 @@ pub enum CreateRedeemTxError {
     InvalidBlockHeight,
     InvalidWeight,
     InvalidSigningData,
-    InvalidSighash,
     InvalidMessage,
     InvalidSecretKey,
     AmountTooLow,
