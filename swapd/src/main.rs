@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
-use chain::whatthefee::WhatTheFeeEstimator;
+use whatthefee::WhatTheFeeEstimator;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use private_server::internal_swap_api::swap_manager_server::SwapManagerServer;
@@ -25,6 +25,7 @@ mod lightning;
 mod postgresql;
 mod private_server;
 mod public_server;
+mod whatthefee;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
