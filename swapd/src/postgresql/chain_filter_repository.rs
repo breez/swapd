@@ -15,6 +15,14 @@ impl ChainFilterRepository {
 #[async_trait::async_trait]
 impl chain_filter::ChainFilterRepository for ChainFilterRepository {
     #[instrument(level = "trace", skip(self))]
+    async fn add_filter_addresses(
+        &self,
+        addresses: &[Address],
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        todo!()
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn has_filtered_address(
         &self,
         addresses: &[Address],

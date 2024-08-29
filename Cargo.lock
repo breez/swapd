@@ -2177,6 +2177,10 @@ name = "swap-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "prost",
+ "tokio",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]

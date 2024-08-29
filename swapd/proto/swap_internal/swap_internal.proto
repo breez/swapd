@@ -1,0 +1,12 @@
+syntax = "proto3";
+package swap_internal;
+
+service SwapManager {
+    rpc AddAddressFilters (AddAddressFiltersRequest) returns (AddAddressFiltersReply) {}
+}
+
+message AddAddressFiltersRequest {
+    repeated string addresses = 1;
+}
+
+message AddAddressFiltersReply {}

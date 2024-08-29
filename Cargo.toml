@@ -4,3 +4,10 @@ members = [
     "redeemd", "swap-cli",
     "swapd",
 ]
+
+[workspace.dependencies]
+clap = { version = "4.5.8", features = ["derive"] }
+prost = "0.13.1"
+tokio = { version = "1.39.2" }
+tonic = "0.12.1"
+tonic-build = "0.12.1"

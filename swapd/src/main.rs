@@ -17,6 +17,7 @@ mod chain_filter;
 mod cln;
 mod lightning;
 mod postgresql;
+mod private_server;
 mod public_server;
 
 #[derive(Parser, Debug)]
