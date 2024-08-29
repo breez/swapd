@@ -86,8 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
-    let swap_repository = Arc::new(postgresql::SwapRepository::new(pgpool, args.network));
-    let chain_filter_repository = Arc::new(postgresql::ChainFilterRepository::new());
+    let swap_repository = Arc::new(postgresql::SwapRepository::new(
+        Arc::clone(&pgpool),
+        args.network,
+    ));
+    let chain_filter_repository =
+        Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
     let chain_filter = Arc::new(ChainFilterImpl::new(
         Arc::clone(&cln_client),
         Arc::clone(&chain_filter_repository),

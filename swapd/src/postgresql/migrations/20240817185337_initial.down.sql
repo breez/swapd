@@ -1,4 +1,5 @@
 
+DROP TABLE filter_addresses;
 DROP INDEX swap_utxos_block_hash_idx;
 DROP TABLE swap_utxos;
 DROP TABLE blocks;

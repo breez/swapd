@@ -32,3 +32,7 @@ CREATE TABLE swap_utxos (
 
 -- Allow easy tracking of which utxos to delete in case of a reorg.
 CREATE INDEX swap_utxos_block_hash_idx ON swap_utxos(block_hash);
+
+CREATE TABLE filter_addresses (
+    address VARCHAR PRIMARY KEY
+);
