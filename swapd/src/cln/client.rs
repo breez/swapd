@@ -57,17 +57,6 @@ impl LightningClient for Client {
     }
 }
 
-#[async_trait::async_trait]
-impl ChainClient for Client {
-    async fn get_blockheight(&self) -> Result<u32, ChainError> {
-        todo!()
-    }
-
-    async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError> {
-        todo!()
-    }
-}
-
 impl From<tonic::transport::Error> for PayError {
     fn from(_value: tonic::transport::Error) -> Self {
         PayError::ConnectionFailed

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bitcoin::Network;
+use bitcoind::BitcoindClient;
 use chain::whatthefee::WhatTheFeeEstimator;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
@@ -16,6 +17,7 @@ use tonic::transport::{Server, Uri};
 use tracing::{field, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+mod bitcoind;
 mod chain;
 mod chain_filter;
 mod cln;
@@ -75,6 +77,18 @@ struct Args {
     /// Connectionstring to the postgres database.
     #[arg(long)]
     pub db_url: String,
+
+    /// Address to the bitcoind rpc.
+    #[arg(long)]
+    pub bitcoind_rpc_address: String,
+
+    /// Bitcoind rpc username.
+    #[arg(long)]
+    pub bitcoind_rpc_user: String,
+
+    /// Bitcoind rpc password.
+    #[arg(long)]
+    pub bitcoind_rpc_password: String,
 }
 
 #[tokio::main]
@@ -92,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.dust_limit_sat,
     ));
 
+    let bitcoind_client = Arc::new(BitcoindClient::new(args.bitcoind_rpc_address, args.bitcoind_rpc_user, args.bitcoind_rpc_password));
     let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
@@ -101,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let chain_filter_repository =
         Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
     let chain_filter = Arc::new(ChainFilterImpl::new(
-        Arc::clone(&cln_client),
+        Arc::clone(&bitcoind_client),
         Arc::clone(&chain_filter_repository),
     ));
     let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
@@ -113,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_confirmations: args.min_confirmations,
             min_redeem_blocks: args.min_redeem_blocks,
         },
-        Arc::clone(&cln_client),
+        Arc::clone(&bitcoind_client),
         Arc::clone(&chain_filter),
         Arc::clone(&cln_client),
         Arc::clone(&swap_service),
@@ -126,16 +141,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chain_filter_repository,
     ));
 
-    info!(
-        address = field::display(&args.address),
-        "Starting swapper server"
-    );
-
     let token = CancellationToken::new();
     let server_token = token.clone();
     let internal_server_token = token.clone();
     let tracker = TaskTracker::new();
     tracker.spawn(async move {
+        info!(
+            address = field::display(&args.address),
+            "Starting swapper server"
+        );
         let res = Server::builder()
             .add_service(swapper_server)
             .serve_with_shutdown(args.address, async {
@@ -151,6 +165,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         server_token.cancel();
     });
     tracker.spawn(async move {
+        info!(
+            address = field::display(&args.internal_address),
+            "Starting internal server"
+        );
         let res = Server::builder()
             .add_service(internal_server)
             .serve_with_shutdown(args.internal_address, async {
