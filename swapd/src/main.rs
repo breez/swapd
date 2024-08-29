@@ -10,9 +10,12 @@ use public_server::{
     SwapServerParams, SwapService,
 };
 use sqlx::PgPool;
+use tokio::signal;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Server, Uri};
-use tracing::{field, info};
+use tracing::{field, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
 mod chain;
 mod chain_filter;
 mod cln;
@@ -118,20 +121,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&fee_estimator),
     ));
 
-    let internal_server = SwapManagerServer::new(private_server::Server::new(args.network, chain_filter_repository));
+    let internal_server = SwapManagerServer::new(private_server::Server::new(
+        args.network,
+        chain_filter_repository,
+    ));
 
     info!(
         address = field::display(&args.address),
         "Starting swapper server"
     );
-    Server::builder()
-        .add_service(swapper_server)
-        .serve(args.address)
-        .await?;
 
-    Server::builder()
-        .add_service(internal_server)
-        .serve(args.internal_address)
-        .await?;
+    let token = CancellationToken::new();
+    let server_token = token.clone();
+    let internal_server_token = token.clone();
+    let tracker = TaskTracker::new();
+    tracker.spawn(async move {
+        let res = Server::builder()
+            .add_service(swapper_server)
+            .serve_with_shutdown(args.address, async {
+                server_token.cancelled().await;
+                info!("swapper server shutting down");
+            })
+            .await;
+        match res {
+            Ok(_) => info!("swapper server exited"),
+            Err(e) => info!("swapper server exited with {:?}", e),
+        }
+
+        server_token.cancel();
+    });
+    tracker.spawn(async move {
+        let res = Server::builder()
+            .add_service(internal_server)
+            .serve_with_shutdown(args.internal_address, async {
+                internal_server_token.cancelled().await;
+                info!("internal server shutting down");
+            })
+            .await;
+        match res {
+            Ok(_) => info!("internal server exited"),
+            Err(e) => info!("internal server exited with {:?}", e),
+        }
+        internal_server_token.cancel();
+    });
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {}
+            Err(err) => {
+                warn!("Unable to listen for shutdown signal: {}", err);
+            }
+        }
+        token.cancel();
+    });
+
+    tracker.wait().await;
+    info!("shutdown complete");
     Ok(())
 }
