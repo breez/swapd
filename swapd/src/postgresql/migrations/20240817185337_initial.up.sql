@@ -1,5 +1,6 @@
 CREATE TABLE swaps (
     id BIGSERIAL PRIMARY KEY,
+    creation_time BIGINT NOT NULL,
     payer_pubkey BYTEA NOT NULL,
     swapper_pubkey BYTEA NOT NULL,
     payment_hash BYTEA NOT NULL,

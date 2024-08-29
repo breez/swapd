@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use bitcoin::{
     absolute::{self, LockTime},
     hashes::{ripemd160, sha256, Hash},
@@ -19,6 +21,7 @@ const REDEEM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
 
 #[derive(Debug)]
 pub struct Swap {
+    pub creation_time: SystemTime,
     pub public: SwapPublicData,
     pub private: SwapPrivateData,
 }
@@ -97,6 +100,7 @@ where
         payer_pubkey: PublicKey,
         hash: sha256::Hash,
     ) -> Result<Swap, CreateSwapError> {
+        let creation_time = SystemTime::now();
         let swapper_privkey = self.privkey_provider.new_private_key().map_err(|e| {
             debug!("error creating private key: {:?}", e);
             CreateSwapError::PrivateKeyError
@@ -123,6 +127,7 @@ where
         let address = Address::p2wsh(&script, self.network);
 
         Ok(Swap {
+            creation_time,
             public: SwapPublicData {
                 payer_pubkey,
                 swapper_pubkey,

@@ -1,4 +1,8 @@
-use std::{str::FromStr, sync::Arc};
+use std::{
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
+};
 
 use bitcoin::{
     address::NetworkUnchecked,
@@ -34,15 +38,17 @@ impl public_server::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError> {
         sqlx::query(
-            r#"INSERT INTO swaps (payer_pubkey
+            r#"INSERT INTO swaps (creation_time
+               ,                  payer_pubkey
                ,                  swapper_pubkey
                ,                  payment_hash
                ,                  script
                ,                  address
                ,                  lock_time
                ,                  swapper_privkey
-               ) VALUES ($1, $2, $3, $4, $5< $6, $7)"#,
+               ) VALUES ($1, $2, $3, $4, $5< $6, $7, $8)"#,
         )
+        .bind(swap.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
         .bind(swap.public.payer_pubkey.to_bytes())
         .bind(swap.public.hash.to_byte_array().to_vec())
         .bind(swap.public.script.to_bytes())
@@ -73,7 +79,8 @@ impl public_server::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn get_swap_state_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError> {
         let mut rows = sqlx::query(
-            r#"SELECT s.payer_pubkey
+            r#"SELECT s.creation_time
+               ,      s.payer_pubkey
                ,      s.swapper_pubkey
                ,      s.script
                ,      s.address
@@ -95,6 +102,7 @@ impl public_server::SwapRepository for SwapRepository {
         let mut utxos: Vec<Utxo> = Vec::new();
         while let Some(row) = rows.try_next().await? {
             if swap.is_none() {
+                let creation_time: i64 = row.try_get("creation_time")?;
                 let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
                 let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
                 let script: Vec<u8> = row.try_get("script")?;
@@ -102,7 +110,11 @@ impl public_server::SwapRepository for SwapRepository {
                 let lock_time: i64 = row.try_get("lock_time")?;
                 let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
 
+                let creation_time = SystemTime::UNIX_EPOCH
+                    .checked_add(Duration::from_secs(creation_time as u64))
+                    .ok_or(GetSwapError::General("invalid timestamp".into()))?;
                 swap = Some(Swap {
+                    creation_time,
                     public: SwapPublicData {
                         address: address
                             .parse::<Address<NetworkUnchecked>>()?
@@ -175,6 +187,12 @@ impl From<sqlx::Error> for SwapPersistenceError {
             },
             e => SwapPersistenceError::General(Box::new(e)),
         }
+    }
+}
+
+impl From<SystemTimeError> for SwapPersistenceError {
+    fn from(value: SystemTimeError) -> Self {
+        SwapPersistenceError::General(Box::new(value))
     }
 }
 
