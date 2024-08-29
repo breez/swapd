@@ -3,3 +3,5 @@ pub mod internal_swap_api {
 }
 
 mod server;
+
+pub use server::Server;

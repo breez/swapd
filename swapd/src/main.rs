@@ -4,6 +4,7 @@ use bitcoin::Network;
 use chain::whatthefee::WhatTheFeeEstimator;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
+use private_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{
     swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
     SwapServerParams, SwapService,
@@ -26,6 +27,10 @@ struct Args {
     /// Address the grpc server will listen on.
     #[arg(long)]
     pub address: core::net::SocketAddr,
+
+    /// Address the internal grpc server will listen on.
+    #[arg(long)]
+    pub internal_address: core::net::SocketAddr,
 
     /// Maximum amount allowed for swaps.
     #[arg(long, default_value = "4_000_000")]
@@ -113,6 +118,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&fee_estimator),
     ));
 
+    let internal_server = SwapManagerServer::new(private_server::Server::new(args.network, chain_filter_repository));
+
     info!(
         address = field::display(&args.address),
         "Starting swapper server"
@@ -122,5 +129,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .serve(args.address)
         .await?;
 
+    Server::builder()
+        .add_service(internal_server)
+        .serve(args.internal_address)
+        .await?;
     Ok(())
 }

@@ -1,2 +1,1 @@
-- [ ] implement method to add addresses to the chain filter
 - [ ] redeem logic
