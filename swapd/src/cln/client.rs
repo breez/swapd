@@ -1,11 +1,7 @@
-use bitcoin::{Address, OutPoint};
 use tonic::{transport::Uri, Request};
 use tracing::{debug, error, instrument, warn};
 
-use crate::{
-    chain::{ChainClient, ChainError},
-    lightning::{LightningClient, PayError},
-};
+use crate::lightning::{LightningClient, PayError};
 
 use super::cln_api::{node_client::NodeClient, pay_response::PayStatus, PayRequest};
 

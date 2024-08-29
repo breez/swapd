@@ -20,3 +20,9 @@ pub trait ChainClient {
     async fn get_blockheight(&self) -> Result<u32, ChainError>;
     async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError>;
 }
+
+impl From<Box<dyn std::error::Error>> for ChainError {
+    fn from(value: Box<dyn std::error::Error>) -> Self {
+        ChainError::General(value)
+    }
+}

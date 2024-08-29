@@ -106,7 +106,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.dust_limit_sat,
     ));
 
-    let bitcoind_client = Arc::new(BitcoindClient::new(args.bitcoind_rpc_address, args.bitcoind_rpc_user, args.bitcoind_rpc_password));
+    let bitcoind_client = Arc::new(BitcoindClient::new(
+        args.bitcoind_rpc_address,
+        args.bitcoind_rpc_user,
+        args.bitcoind_rpc_password,
+        args.network,
+    ));
     let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
