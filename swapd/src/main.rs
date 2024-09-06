@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
-use whatthefee::WhatTheFeeEstimator;
+use chain::ChainMonitor;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use private_server::internal_swap_api::swap_manager_server::SwapManagerServer;
@@ -16,6 +16,7 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Server, Uri};
 use tracing::{field, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use whatthefee::WhatTheFeeEstimator;
 
 mod bitcoind;
 mod chain;
@@ -50,7 +51,7 @@ struct Args {
     /// Minimum number of confirmations required before a swap is eligible for
     /// payout.
     #[arg(long, default_value = "1")]
-    pub min_confirmations: u32,
+    pub min_confirmations: u64,
 
     /// Minimum number of blocks needed to redeem a utxo onchain. A utxo is no
     /// longer eligible for payout when the lock time left is less than this
@@ -90,6 +91,10 @@ struct Args {
     /// Bitcoind rpc password.
     #[arg(long)]
     pub bitcoind_rpc_password: String,
+
+    /// Polling interval between chain syncs.
+    #[arg(long, default_value = "20")]
+    pub chain_poll_interval_seconds: u64,
 }
 
 #[tokio::main]
@@ -107,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.dust_limit_sat,
     ));
 
-    let bitcoind_client = Arc::new(BitcoindClient::new(
+    let chain_client = Arc::new(BitcoindClient::new(
         args.bitcoind_rpc_address,
         args.bitcoind_rpc_user,
         args.bitcoind_rpc_password,
@@ -119,10 +124,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&pgpool),
         args.network,
     ));
+    let chain_repository = Arc::new(postgresql::ChainRepository::new(Arc::clone(&pgpool)));
     let chain_filter_repository =
         Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
     let chain_filter = Arc::new(ChainFilterImpl::new(
-        Arc::clone(&bitcoind_client),
+        Arc::clone(&chain_client),
         Arc::clone(&chain_filter_repository),
     ));
     let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
@@ -134,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_confirmations: args.min_confirmations,
             min_redeem_blocks: args.min_redeem_blocks,
         },
-        Arc::clone(&bitcoind_client),
+        Arc::clone(&chain_client),
         Arc::clone(&chain_filter),
         Arc::clone(&cln_client),
         Arc::clone(&swap_service),
@@ -146,11 +152,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.network,
         chain_filter_repository,
     ));
+    let chain_monitor = ChainMonitor::new(
+        args.network,
+        Arc::clone(&chain_client),
+        Arc::clone(&chain_repository),
+        Duration::from_secs(args.chain_poll_interval_seconds),
+    );
 
     let token = CancellationToken::new();
     let server_token = token.clone();
     let internal_server_token = token.clone();
+    let chain_monitor_token = token.clone();
     let tracker = TaskTracker::new();
+
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {}
+            Err(err) => {
+                warn!("Unable to listen for shutdown signal: {}", err);
+            }
+        }
+        token.cancel();
+    });
+    tracker.spawn(async move {
+        info!(
+            address = field::display(&args.address),
+            "Starting chain monitor"
+        );
+        let res = chain_monitor
+            .start(async {
+                chain_monitor_token.cancelled().await;
+                info!("chain monitor shutting down");
+            })
+            .await;
+        match res {
+            Ok(_) => info!("chain monitor exited"),
+            Err(e) => info!("chain monitor exited with {:?}", e),
+        };
+        chain_monitor_token.cancel();
+    });
     tracker.spawn(async move {
         info!(
             address = field::display(&args.address),
@@ -187,15 +227,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => info!("internal server exited with {:?}", e),
         }
         internal_server_token.cancel();
-    });
-    tokio::spawn(async move {
-        match signal::ctrl_c().await {
-            Ok(()) => {}
-            Err(err) => {
-                warn!("Unable to listen for shutdown signal: {}", err);
-            }
-        }
-        token.cancel();
     });
 
     tracker.wait().await;

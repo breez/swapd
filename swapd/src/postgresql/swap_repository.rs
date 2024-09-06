@@ -154,7 +154,7 @@ impl public_server::SwapRepository for SwapRepository {
             let height: i64 = row.try_get("height")?;
             utxos.push(Utxo {
                 block_hash: block_hash.parse()?,
-                block_height: height as u32,
+                block_height: height as u64,
                 outpoint: OutPoint {
                     txid: Txid::from_str(tx_id)?,
                     vout: output_index as u32,

@@ -146,14 +146,14 @@ where
         swap: &Swap,
         utxos: &[Utxo],
         fee: &FeeEstimate,
-        current_height: u32,
+        current_height: u64,
         preimage: &[u8; 32],
         destination_address: Address,
     ) -> Result<Transaction, CreateRedeemTxError> {
         let total_value = utxos.iter().fold(0u64, |sum, utxo| sum + utxo.amount_sat);
         let mut tx = Transaction {
             version: 2,
-            lock_time: LockTime::from_height(current_height)?,
+            lock_time: LockTime::from_height(current_height as u32)?,
             input: utxos
                 .iter()
                 .map(|utxo| TxIn {

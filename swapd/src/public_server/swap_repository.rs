@@ -22,6 +22,16 @@ pub enum GetSwapError {
     General(Box<dyn std::error::Error>),
 }
 
+#[derive(Debug)]
+pub enum AddUtxosError {
+    General(Box<dyn std::error::Error>),
+}
+
+#[derive(Debug)]
+pub enum FilterSwapAddressesError {
+    General(Box<dyn std::error::Error>),
+}
+
 pub struct AddressState {
     pub address: Address,
     pub status: AddressStatus,

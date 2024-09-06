@@ -29,7 +29,7 @@ const FAKE_PREIMAGE: [u8; 32] = [0; 32];
 pub struct SwapServerParams {
     pub network: Network,
     pub max_swap_amount_sat: u64,
-    pub min_confirmations: u32,
+    pub min_confirmations: u64,
     pub min_redeem_blocks: u32,
 }
 
@@ -45,7 +45,7 @@ where
 {
     network: Network,
     max_swap_amount_sat: u64,
-    min_confirmations: u32,
+    min_confirmations: u64,
     min_redeem_blocks: u32,
     chain_service: Arc<C>,
     chain_filter_service: Arc<CF>,
@@ -256,7 +256,7 @@ where
             .swap
             .public
             .lock_time
-            .saturating_sub(self.min_redeem_blocks);
+            .saturating_sub(self.min_redeem_blocks) as u64;
         let utxos = swap_state
             .utxos
             .into_iter()
@@ -409,6 +409,18 @@ impl From<ChainError> for Status {
         match value {
             ChainError::General(e) => {
                 error!("failed to access chain client: {:?}", e);
+                Status::internal("internal error")
+            }
+            ChainError::Database(e) => {
+                error!("database error: {:?}", e);
+                Status::internal("internal error")
+            }
+            ChainError::EmptyChain => {
+                error!("got empty chain error");
+                Status::internal("internal error")
+            }
+            ChainError::InvalidChain => {
+                error!("got invalid chain error");
                 Status::internal("internal error")
             }
         }

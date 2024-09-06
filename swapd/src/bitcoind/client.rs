@@ -1,14 +1,20 @@
-use bitcoin::{consensus::Decodable, Address, Network, OutPoint, Transaction};
+use std::str::FromStr;
+
+use bitcoin::{
+    consensus::{deserialize, Decodable},
+    hashes::{hex::FromHex, sha256d},
+    Address, Block, BlockHash, Network, OutPoint, Transaction,
+};
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use crate::chain::{ChainClient, ChainError};
+use crate::chain::{BlockHeader, ChainClient, ChainError};
 
 use super::{
-    GetBlockCountResponse, GetRawTransactionResponse, RpcError, RpcRequest, RpcServerMessage,
-    RpcServerMessageBody,
+    GetBestBlockHashResponse, GetBlockCountResponse, GetBlockHeaderResponse, GetBlockResponse,
+    GetRawTransactionResponse, RpcError, RpcRequest, RpcServerMessage, RpcServerMessageBody,
 };
 
 #[derive(Debug)]
@@ -24,7 +30,7 @@ pub struct BitcoindClient {
 enum CallError {
     RpcError(RpcError),
     Deserialize(serde_json::error::Error),
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 impl From<reqwest::Error> for CallError {
@@ -81,9 +87,51 @@ impl BitcoindClient {
         *counter
     }
 
+    async fn getbestblockhash(&self) -> Result<GetBestBlockHashResponse, CallError> {
+        Ok(
+            match self
+                .call("getbestblockhash", Value::Array(Vec::new()))
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            },
+        )
+    }
+
+    async fn getblock(&self, block_hash: String) -> Result<GetBlockResponse, CallError> {
+        Ok(
+            match self
+                .call("getblock", Value::Array(vec![Value::String(block_hash)]))
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            },
+        )
+    }
+
     async fn getblockcount(&self) -> Result<GetBlockCountResponse, CallError> {
         Ok(
             match self.call("getblockcount", Value::Array(Vec::new())).await {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            },
+        )
+    }
+
+    async fn getblockheader(
+        &self,
+        block_hash: String,
+    ) -> Result<GetBlockHeaderResponse, CallError> {
+        Ok(
+            match self
+                .call(
+                    "getblockheader",
+                    Value::Array(vec![Value::String(block_hash)]),
+                )
+                .await
+            {
                 Ok(v) => v,
                 Err(e) => return Err(e),
             },
@@ -108,8 +156,28 @@ impl BitcoindClient {
 
 #[async_trait::async_trait]
 impl ChainClient for BitcoindClient {
-    async fn get_blockheight(&self) -> Result<u32, ChainError> {
+    async fn get_blockheight(&self) -> Result<u64, ChainError> {
         Ok(self.getblockcount().await?.n)
+    }
+
+    async fn get_tip_hash(&self) -> Result<BlockHash, ChainError> {
+        let hex = self.getbestblockhash().await?.hex;
+        Ok(BlockHash::from_raw_hash(sha256d::Hash::from_str(&hex)?))
+    }
+
+    async fn get_block(&self, hash: &BlockHash) -> Result<Block, ChainError> {
+        let hex = self.getblock(hash.to_string()).await?.hex;
+        let raw: Vec<u8> = FromHex::from_hex(&hex)?;
+        Ok(deserialize(&raw)?)
+    }
+
+    async fn get_block_header(&self, hash: &BlockHash) -> Result<BlockHeader, ChainError> {
+        let resp = self.getblockheader(hash.to_string()).await?;
+        Ok(BlockHeader {
+            hash: resp.hash.parse()?,
+            height: resp.height,
+            prev: resp.previousblockhash.parse()?,
+        })
     }
 
     async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError> {
@@ -163,6 +231,12 @@ impl From<serde_json::error::Error> for CallError {
 
 impl From<bitcoin::address::Error> for ChainError {
     fn from(value: bitcoin::address::Error) -> Self {
+        ChainError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::hex::Error> for ChainError {
+    fn from(value: bitcoin::hashes::hex::Error) -> Self {
         ChainError::General(Box::new(value))
     }
 }

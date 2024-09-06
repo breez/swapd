@@ -2200,6 +2200,7 @@ dependencies = [
  "bitcoin",
  "clap",
  "futures",
+ "futures-util",
  "hex",
  "lightning-invoice",
  "prost",

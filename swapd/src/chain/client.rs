@@ -1,28 +1,28 @@
-use bitcoin::{hashes::sha256, Address, OutPoint};
+use bitcoin::{Address, Block, BlockHash, OutPoint};
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
-pub struct Utxo {
-    pub block_hash: sha256::Hash,
-    pub block_height: u32,
-    pub outpoint: OutPoint,
-    pub amount_sat: u64,
-}
+use super::ChainRepositoryError;
 
 #[derive(Debug, Error)]
 pub enum ChainError {
     #[error("{0}")]
-    General(Box<dyn std::error::Error>),
+    Database(ChainRepositoryError),
+    #[error("empty chain")]
+    EmptyChain,
+    #[error("invalid chain")]
+    InvalidChain,
+    #[error("{0}")]
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[async_trait::async_trait]
 pub trait ChainClient {
-    async fn get_blockheight(&self) -> Result<u32, ChainError>;
+    async fn get_blockheight(&self) -> Result<u64, ChainError>;
+    async fn get_tip_hash(&self) -> Result<BlockHash, ChainError>;
+    async fn get_block(&self, hash: &BlockHash) -> Result<Block, ChainError>;
+    async fn get_block_header(
+        &self,
+        hash: &BlockHash,
+    ) -> Result<super::types::BlockHeader, ChainError>;
     async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError>;
-}
-
-impl From<Box<dyn std::error::Error>> for ChainError {
-    fn from(value: Box<dyn std::error::Error>) -> Self {
-        ChainError::General(value)
-    }
 }
