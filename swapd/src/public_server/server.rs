@@ -18,14 +18,12 @@ use crate::{
     public_server::swap_api::AddressStatus,
 };
 
-use super::{
-    privkey_provider::PrivateKeyProvider,
-    swap_api::{
-        swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
-        AddFundStatusRequest, GetSwapPaymentReply, GetSwapPaymentRequest,
-    },
-    swap_repository::{GetSwapError, SwapPersistenceError, SwapRepository},
-    swap_service::CreateSwapError,
+use super::swap_api::{
+    swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
+    AddFundStatusRequest, GetSwapPaymentReply, GetSwapPaymentRequest,
+};
+use crate::swap::{
+    CreateSwapError, GetSwapError, PrivateKeyProvider, SwapPersistenceError, SwapRepository,
     SwapService,
 };
 

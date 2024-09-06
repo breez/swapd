@@ -13,9 +13,9 @@ use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
 use tracing::instrument;
 
-use crate::public_server::{
-    self, AddPreimageError, GetSwapError, GetSwapsError, Swap, SwapPersistenceError,
-    SwapPrivateData, SwapPublicData, SwapState,
+use crate::swap::{
+    AddPreimageError, GetSwapError, GetSwapsError, Swap, SwapPersistenceError, SwapPrivateData,
+    SwapPublicData, SwapState,
 };
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl SwapRepository {
 }
 
 #[async_trait::async_trait]
-impl public_server::SwapRepository for SwapRepository {
+impl crate::swap::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError> {
         sqlx::query(

@@ -6,11 +6,9 @@ use chain::ChainMonitor;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use private_server::internal_swap_api::swap_manager_server::SwapManagerServer;
-use public_server::{
-    swap_api::swapper_server::SwapperServer, RandomPrivateKeyProvider, SwapServer,
-    SwapServerParams, SwapService,
-};
+use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use sqlx::PgPool;
+use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Server, Uri};
@@ -26,6 +24,7 @@ mod lightning;
 mod postgresql;
 mod private_server;
 mod public_server;
+mod swap;
 mod whatthefee;
 
 #[derive(Parser, Debug)]
