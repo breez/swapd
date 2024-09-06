@@ -24,7 +24,7 @@ pub struct SpentUtxo {
 pub trait ChainRepository {
     async fn add_block(&self, block: &BlockHeader) -> Result<(), ChainRepositoryError>;
     async fn add_watch_address(&self, address: Address) -> Result<(), ChainRepositoryError>;
-    async fn add_watch_addresses(&self, address: &[Address]) -> Result<(), ChainRepositoryError>;
+    async fn add_watch_addresses(&self, addresses: &[Address]) -> Result<(), ChainRepositoryError>;
     async fn add_utxo(&self, utxo: &AddressUtxo) -> Result<(), ChainRepositoryError>;
     async fn add_utxos(&self, utxos: &[AddressUtxo]) -> Result<(), ChainRepositoryError>;
     async fn filter_watch_addresses(

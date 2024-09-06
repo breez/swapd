@@ -22,17 +22,32 @@ CREATE TABLE blocks (
     height BIGINT NOT NULL
 );
 
-CREATE TABLE swap_utxos (
-    swap_id BIGINT NOT NULL REFERENCES swaps,
-    tx_id varchar NOT NULL,
-    output_index bigint NOT NULL,
-    amount bigint NOT NULL,
-    block_hash varchar NOT NULL, -- not a foreign key, to keep a record of potentially lost coins due to reorgs.
-    PRIMARY KEY (tx_id, output_index)
+CREATE INDEX blocks_height_idx ON blocks(height);
+
+CREATE TABLE watch_addresses (
+    address VARCHAR PRIMARY KEY
 );
 
+CREATE TABLE address_utxos (
+    id BIGSERIAL PRIMARY KEY, 
+    address VARCHAR NOT NULL,
+    tx_id VARCHAR NOT NULL,
+    output_index BIGINT NOT NULL,
+    amount BIGINT NOT NULL,
+    block_hash VARCHAR NOT NULL -- not a foreign key, to keep a record of potentially lost coins due to reorgs.
+);
+
+CREATE INDEX address_utxos_tx_id_output_index_idx ON address_utxos(tx_id, output_index);
+CREATE INDEX address_utxos_address_idx ON address_utxos(address);
 -- Allow easy tracking of which utxos to delete in case of a reorg.
-CREATE INDEX swap_utxos_block_hash_idx ON swap_utxos(block_hash);
+CREATE INDEX address_utxos_block_hash_idx ON address_utxos(block_hash);
+
+CREATE TABLE spent_utxos (
+    id BIGSERIAL PRIMARY KEY,
+    utxo_id BIGINT NOT NULL REFERENCES address_utxos,
+    spending_tx_id VARCHAR NOT NULL,
+    spending_block_hash VARCHAR NOT NULL
+);
 
 CREATE TABLE filter_addresses (
     address VARCHAR PRIMARY KEY

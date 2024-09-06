@@ -124,7 +124,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&pgpool),
         args.network,
     ));
-    let chain_repository = Arc::new(postgresql::ChainRepository::new(Arc::clone(&pgpool)));
+    let chain_repository = Arc::new(postgresql::ChainRepository::new(
+        Arc::clone(&pgpool),
+        args.network,
+    ));
     let chain_filter_repository =
         Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
     let chain_filter = Arc::new(ChainFilterImpl::new(

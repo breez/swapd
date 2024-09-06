@@ -78,6 +78,7 @@ impl public_server::SwapRepository for SwapRepository {
 
     #[instrument(level = "trace", skip(self))]
     async fn get_swap_state_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError> {
+        // TODO: This query no longer works. swap_utxos is removed.
         let mut rows = sqlx::query(
             r#"SELECT s.creation_time
                ,      s.payer_pubkey
