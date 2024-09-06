@@ -20,6 +20,12 @@ use super::privkey_provider::PrivateKeyProvider;
 const REDEEM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
 
 #[derive(Debug)]
+pub struct SwapState {
+    pub swap: Swap,
+    pub preimage: Option<[u8; 32]>,
+}
+
+#[derive(Debug)]
 pub struct Swap {
     pub creation_time: SystemTime,
     pub public: SwapPublicData,

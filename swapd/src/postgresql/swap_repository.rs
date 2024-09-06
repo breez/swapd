@@ -77,9 +77,8 @@ impl public_server::SwapRepository for SwapRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn get_swap_state_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError> {
-        // TODO: This query no longer works. swap_utxos is removed.
-        let mut rows = sqlx::query(
+    async fn get_swap(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError> {
+        let maybe_row = sqlx::query(
             r#"SELECT s.creation_time
                ,      s.payer_pubkey
                ,      s.swapper_pubkey
@@ -87,87 +86,66 @@ impl public_server::SwapRepository for SwapRepository {
                ,      s.address
                ,      s.lock_time
                ,      s.swapper_privkey
-               ,      su.tx_id
-               ,      su.output_index
-               ,      su.amount
-               ,      b.block_hash
-               ,      b.height
+               ,      s.preimage
                FROM swaps s
-               LEFT JOIN swap_utxos su ON s.id = su.swap_id
-               LEFT JOIN blocks b ON su.block_hash = b.block_hash
                WHERE s.payment_hash = $1"#,
         )
         .bind(hash.to_byte_array().to_vec())
-        .fetch(&*self.pool);
-        let mut swap: Option<Swap> = None;
-        let mut utxos: Vec<Utxo> = Vec::new();
-        while let Some(row) = rows.try_next().await? {
-            if swap.is_none() {
-                let creation_time: i64 = row.try_get("creation_time")?;
-                let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-                let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-                let script: Vec<u8> = row.try_get("script")?;
-                let address: &str = row.try_get("address")?;
-                let lock_time: i64 = row.try_get("lock_time")?;
-                let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
+        .fetch_optional(&*self.pool)
+        .await?;
 
-                let creation_time = SystemTime::UNIX_EPOCH
-                    .checked_add(Duration::from_secs(creation_time as u64))
-                    .ok_or(GetSwapError::General("invalid timestamp".into()))?;
-                swap = Some(Swap {
-                    creation_time,
-                    public: SwapPublicData {
-                        address: address
-                            .parse::<Address<NetworkUnchecked>>()?
-                            .require_network(self.network)?,
-                        hash: *hash,
-                        lock_time: lock_time as u32,
-                        payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                        swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                        script: ScriptBuf::from_bytes(script),
-                    },
-                    private: SwapPrivateData {
-                        swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
-                    },
-                })
-            }
+        let row = match maybe_row {
+            Some(row) => row,
+            None => return Err(GetSwapError::NotFound),
+        };
 
-            let tx_id = match row.try_get::<Option<&str>, &str>("tx_id")? {
-                Some(tx_id) => tx_id,
-                None => {
-                    trace!("skipping utxo because tx id was not found");
-                    continue;
-                }
-            };
-            let output_index: i64 = row.try_get("output_index")?;
-            let amount: i64 = row.try_get("amount")?;
-            let block_hash = match row.try_get::<Option<&str>, &str>("block_hash")? {
-                Some(block_hash) => block_hash,
-                None => {
-                    trace!(
-                        tx_id,
-                        output_index,
-                        "skipping utxo because block hash was not found"
-                    );
-                    continue;
-                }
-            };
-            let height: i64 = row.try_get("height")?;
-            utxos.push(Utxo {
-                block_hash: block_hash.parse()?,
-                block_height: height as u64,
-                outpoint: OutPoint {
-                    txid: Txid::from_str(tx_id)?,
-                    vout: output_index as u32,
-                },
-                amount_sat: amount as u64,
-            })
-        }
+        let creation_time: i64 = row.try_get("creation_time")?;
+        let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
+        let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
+        let script: Vec<u8> = row.try_get("script")?;
+        let address: &str = row.try_get("address")?;
+        let lock_time: i64 = row.try_get("lock_time")?;
+        let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
+        let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
 
-        match swap {
-            Some(swap) => Ok(SwapState { swap, utxos }),
-            None => Err(GetSwapError::NotFound),
-        }
+        let creation_time = SystemTime::UNIX_EPOCH
+            .checked_add(Duration::from_secs(creation_time as u64))
+            .ok_or(GetSwapError::General("invalid timestamp".into()))?;
+        let swap = Swap {
+            creation_time,
+            public: SwapPublicData {
+                address: address
+                    .parse::<Address<NetworkUnchecked>>()?
+                    .require_network(self.network)?,
+                hash: *hash,
+                lock_time: lock_time as u32,
+                payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
+                swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
+                script: ScriptBuf::from_bytes(script),
+            },
+            private: SwapPrivateData {
+                swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
+            },
+        };
+
+        let a: Option<Vec<u8>> = None;
+        let b: Option<Result<[u8; 32], _>> = match a {
+            Some(a) => Some(a.try_into()),
+            None => None,
+        };
+        let c: [u8; 32] = b.unwrap().unwrap();
+
+        Ok(SwapState {
+            swap,
+            preimage: match preimage {
+                Some(preimage) => Some(
+                    preimage
+                        .try_into()
+                        .map_err(|_| GetSwapError::InvalidPreimage)?,
+                ),
+                None => None,
+            },
+        })
     }
 
     #[instrument(level = "trace", skip(self))]

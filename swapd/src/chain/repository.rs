@@ -32,6 +32,7 @@ pub trait ChainRepository {
         addresses: &[Address],
     ) -> Result<Vec<Address>, ChainRepositoryError>;
     async fn get_block_headers(&self) -> Result<Vec<BlockHeader>, ChainRepositoryError>;
+    async fn get_utxos(&self, address: &Address) -> Result<Vec<Utxo>, ChainRepositoryError>;
     async fn mark_spent(&self, utxos: &[SpentUtxo]) -> Result<(), ChainRepositoryError>;
     async fn undo_block(&self, hash: BlockHash) -> Result<(), ChainRepositoryError>;
 }

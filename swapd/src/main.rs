@@ -145,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Arc::clone(&chain_client),
         Arc::clone(&chain_filter),
+        Arc::clone(&chain_repository),
         Arc::clone(&cln_client),
         Arc::clone(&swap_service),
         Arc::clone(&swap_repository),

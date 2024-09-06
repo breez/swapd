@@ -9,7 +9,10 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, field, instrument, trace, warn};
 
 use crate::{
-    chain::{ChainClient, ChainError, FeeEstimateError, FeeEstimator, Utxo},
+    chain::{
+        ChainClient, ChainError, ChainRepository, ChainRepositoryError, FeeEstimateError,
+        FeeEstimator, Utxo,
+    },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, PayError},
 };
@@ -34,10 +37,11 @@ pub struct SwapServerParams {
 }
 
 #[derive(Debug)]
-pub struct SwapServer<C, CF, L, P, R, F>
+pub struct SwapServer<C, CF, CR, L, P, R, F>
 where
     C: ChainClient,
     CF: ChainFilterService,
+    CR: ChainRepository,
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
@@ -49,16 +53,18 @@ where
     min_redeem_blocks: u32,
     chain_service: Arc<C>,
     chain_filter_service: Arc<CF>,
+    chain_repository: Arc<CR>,
     lightning_client: Arc<L>,
     swap_service: Arc<SwapService<P>>,
     swap_repository: Arc<R>,
     fee_estimator: Arc<F>,
 }
 
-impl<C, CF, L, P, R, F> SwapServer<C, CF, L, P, R, F>
+impl<C, CF, CR, L, P, R, F> SwapServer<C, CF, CR, L, P, R, F>
 where
     C: ChainClient,
     CF: ChainFilterService,
+    CR: ChainRepository,
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
@@ -68,6 +74,7 @@ where
         params: &SwapServerParams,
         chain_service: Arc<C>,
         chain_filter_service: Arc<CF>,
+        chain_repository: Arc<CR>,
         lightning_client: Arc<L>,
         swap_service: Arc<SwapService<P>>,
         swap_repository: Arc<R>,
@@ -80,6 +87,7 @@ where
             max_swap_amount_sat: params.max_swap_amount_sat,
             chain_service,
             chain_filter_service,
+            chain_repository,
             lightning_client,
             swap_service,
             swap_repository,
@@ -88,10 +96,11 @@ where
     }
 }
 #[tonic::async_trait]
-impl<C, CF, L, P, R, F> Swapper for SwapServer<C, CF, L, P, R, F>
+impl<C, CF, CR, L, P, R, F> Swapper for SwapServer<C, CF, CR, L, P, R, F>
 where
     C: ChainClient + Debug + Send + Sync + 'static,
     CF: ChainFilterService + Debug + Send + Sync + 'static,
+    CR: ChainRepository + Debug + Send + Sync + 'static,
     L: LightningClient + Debug + Send + Sync + 'static,
     P: PrivateKeyProvider + Debug + Send + Sync + 'static,
     R: SwapRepository + Debug + Send + Sync + 'static,
@@ -244,9 +253,19 @@ where
 
         let swap_state = self
             .swap_repository
-            .get_swap_state_by_hash(invoice.payment_hash())
+            .get_swap(invoice.payment_hash())
             .await?;
-        if swap_state.utxos.is_empty() {
+        if swap_state.preimage.is_some() {
+            trace!("swap already had preimage");
+            return Err(Status::failed_precondition("swap already paid"));
+        }
+
+        let utxos = self
+            .chain_repository
+            .get_utxos(&swap_state.swap.public.address)
+            .await?;
+
+        if utxos.is_empty() {
             trace!("swap has no utxos");
             return Err(Status::failed_precondition("no utxos found"));
         }
@@ -257,8 +276,7 @@ where
             .public
             .lock_time
             .saturating_sub(self.min_redeem_blocks) as u64;
-        let utxos = swap_state
-            .utxos
+        let utxos = utxos
             .into_iter()
             .filter(|utxo| {
                 let confirmations = current_height.saturating_sub(utxo.block_height);
@@ -291,6 +309,7 @@ where
             })
             .collect::<Vec<Utxo>>();
 
+        // TODO: Filter utxos on sync?
         let utxos = match self.chain_filter_service.filter_utxos(&utxos).await {
             Ok(utxos) => utxos,
             Err(e) => {
@@ -389,6 +408,10 @@ impl From<GetSwapError> for Status {
                 error!("failed to get swap: {:?}", e);
                 Status::internal("internal error")
             }
+            GetSwapError::InvalidPreimage => {
+                error!("got invalid preimage");
+                Status::internal("internal error")
+            }
         }
     }
 }
@@ -446,5 +469,16 @@ impl From<PayError> for Status {
     fn from(value: PayError) -> Self {
         debug!("payment failed: {:?}", value);
         Status::unknown("payment failed")
+    }
+}
+
+impl From<ChainRepositoryError> for Status {
+    fn from(value: ChainRepositoryError) -> Self {
+        match value {
+            ChainRepositoryError::General(e) => {
+                error!("failed to get chain data: {:?}", e);
+                Status::internal("internal error")
+            }
+        }
     }
 }

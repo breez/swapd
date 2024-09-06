@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Network};
+use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Network, OutPoint};
 use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
 
-use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentUtxo};
+use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentUtxo, Utxo};
 
 #[derive(Debug)]
 pub struct ChainRepository {
@@ -166,6 +166,40 @@ impl chain::ChainRepository for ChainRepository {
         }
         Ok(result)
     }
+
+    async fn get_utxos(&self, address: &Address) -> Result<Vec<Utxo>, ChainRepositoryError> {
+        let mut rows = sqlx::query(
+            r#"SELECT u.tx_id
+               ,      u.output_index
+               ,      u.amount
+               ,      b.block_hash
+               ,      b.height
+               FROM address_utxos u
+               INNER JOIN blocks b ON u.block_hash = b.block_hash
+               WHERE u.address = $1
+               ORDER BY b.height, u.tx_id, u.output_index"#,
+        )
+        .bind(address.to_string())
+        .fetch(&*self.pool);
+
+        let mut result: Vec<Utxo> = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let tx_id: String = row.try_get("tx_id")?;
+            let output_index: i64 = row.try_get("output_index")?;
+            let amount: i64 = row.try_get("amount")?;
+            let block_hash: String = row.try_get("block_hash")?;
+            let height: i64 = row.try_get("height")?;
+            let utxo = Utxo {
+                block_hash: block_hash.parse()?,
+                block_height: height as u64,
+                outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
+                amount_sat: amount as u64,
+            };
+            result.push(utxo);
+        }
+        Ok(result)
+    }
+
     async fn mark_spent(&self, utxos: &[SpentUtxo]) -> Result<(), ChainRepositoryError> {
         let spending_tx_ids: Vec<_> = utxos.iter().map(|u| u.spending_tx.to_string()).collect();
         let spending_block_hashes: Vec<_> =
