@@ -5,7 +5,7 @@ use bitcoind::BitcoindClient;
 use chain::ChainMonitor;
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
-use private_server::internal_swap_api::swap_manager_server::SwapManagerServer;
+use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
@@ -22,7 +22,7 @@ mod chain_filter;
 mod cln;
 mod lightning;
 mod postgresql;
-mod private_server;
+mod internal_server;
 mod public_server;
 mod swap;
 mod whatthefee;
@@ -151,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&fee_estimator),
     ));
 
-    let internal_server = SwapManagerServer::new(private_server::Server::new(
+    let internal_server = SwapManagerServer::new(internal_server::Server::new(
         args.network,
         chain_filter_repository,
     ));
