@@ -9,9 +9,13 @@ use tracing::{instrument, warn};
 
 use crate::chain_filter::ChainFilterRepository;
 
-use super::internal_swap_api::{
+use internal_swap_api::{
     swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest,
 };
+
+pub mod internal_swap_api {
+    tonic::include_proto!("swap_internal");
+}
 
 #[derive(Debug)]
 pub struct Server<R>

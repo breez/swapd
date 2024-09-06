@@ -18,14 +18,18 @@ use crate::{
     public_server::swap_api::AddressStatus,
 };
 
-use super::swap_api::{
-    swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
-    AddFundStatusRequest, GetSwapPaymentReply, GetSwapPaymentRequest,
-};
 use crate::swap::{
     CreateSwapError, GetSwapError, PrivateKeyProvider, SwapPersistenceError, SwapRepository,
     SwapService,
 };
+use swap_api::{
+    swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
+    AddFundStatusRequest, GetSwapPaymentReply, GetSwapPaymentRequest,
+};
+
+pub mod swap_api {
+    tonic::include_proto!("swap");
+}
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];
 pub struct SwapServerParams {
