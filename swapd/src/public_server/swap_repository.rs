@@ -1,6 +1,6 @@
-use bitcoin::{hashes::sha256, Address, Txid};
+use std::collections::HashMap;
 
-use crate::chain::Utxo;
+use bitcoin::{hashes::sha256, Address};
 
 use super::{swap_service::Swap, SwapState};
 
@@ -24,35 +24,9 @@ pub enum GetSwapError {
 }
 
 #[derive(Debug)]
-pub enum AddUtxosError {
+pub enum GetSwapsError {
+    InvalidPreimage,
     General(Box<dyn std::error::Error>),
-}
-
-#[derive(Debug)]
-pub enum FilterSwapAddressesError {
-    General(Box<dyn std::error::Error>),
-}
-
-pub struct AddressState {
-    pub address: Address,
-    pub status: AddressStatus,
-}
-
-pub enum AddressStatus {
-    Unknown,
-    Mempool {
-        tx_info: TxInfo,
-    },
-    Confirmed {
-        block_hash: sha256::Hash,
-        block_height: u64,
-        tx_info: TxInfo,
-    },
-}
-
-pub struct TxInfo {
-    pub tx: Txid,
-    pub amount: u64,
 }
 
 #[async_trait::async_trait]
@@ -60,8 +34,8 @@ pub trait SwapRepository {
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError>;
     async fn add_preimage(&self, swap: &Swap, preimage: &[u8; 32]) -> Result<(), AddPreimageError>;
     async fn get_swap(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
-    async fn get_state(
+    async fn get_swaps(
         &self,
-        addresses: Vec<Address>,
-    ) -> Result<Vec<AddressState>, Box<dyn std::error::Error>>;
+        addresses: &[Address],
+    ) -> Result<HashMap<Address, SwapState>, GetSwapsError>;
 }

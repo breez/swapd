@@ -15,15 +15,16 @@ use crate::{
     },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, PayError},
+    public_server::swap_api::AddressStatus,
 };
 
 use super::{
     privkey_provider::PrivateKeyProvider,
     swap_api::{
-        self, swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
+        swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
         AddFundStatusRequest, GetSwapPaymentReply, GetSwapPaymentRequest,
     },
-    swap_repository::{AddressStatus, GetSwapError, SwapPersistenceError, SwapRepository},
+    swap_repository::{GetSwapError, SwapPersistenceError, SwapRepository},
     swap_service::CreateSwapError,
     SwapService,
 };
@@ -131,6 +132,9 @@ where
         let min_allowed_deposit = fee_estimate.sat_per_kw.saturating_mul(3) / 2;
 
         let swap = self.swap_service.create_swap(payer_pubkey, hash)?;
+        self.chain_repository
+            .add_watch_address(&swap.public.address)
+            .await?;
         self.swap_repository.add_swap(&swap).await?;
 
         Ok(Response::new(AddFundInitReply {
@@ -171,40 +175,46 @@ where
                 Ok(a)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let states = self
+
+        let swaps = self
             .swap_repository
-            .get_state(addresses)
+            .get_swaps(&addresses)
             .await
             .map_err(|e| {
                 error!("failed to get swap state: {:?}", e);
                 Status::internal("internal error")
             })?;
+        let address_utxos = self
+            .chain_repository
+            .get_utxos_for_addresses(&addresses)
+            .await?;
 
         // TODO: addresses could have multiple utxos.
+        // TODO: 'confirmed' doesn't make sense below, because they're always confirmed.
         Ok(Response::new(AddFundStatusReply {
-            statuses: states
-                .into_iter()
-                .map(|s| {
-                    let status = match s.status {
-                        AddressStatus::Unknown => swap_api::AddressStatus::default(),
-                        AddressStatus::Mempool { tx_info } => swap_api::AddressStatus {
-                            amount: tx_info.amount as i64,
-                            tx: tx_info.tx.to_string(),
-                            ..Default::default()
+            statuses: addresses
+                .iter()
+                .filter_map(|address| {
+                    let _swap = match swaps.get(address) {
+                        Some(swap) => swap,
+                        None => return None,
+                    };
+                    let utxo = match address_utxos.get(address) {
+                        Some(utxos) => match utxos.first() {
+                            Some(utxo) => utxo,
+                            None => return None,
                         },
-                        AddressStatus::Confirmed {
-                            block_hash,
-                            block_height: _,
-                            tx_info,
-                        } => swap_api::AddressStatus {
-                            amount: tx_info.amount as i64,
-                            tx: tx_info.tx.to_string(),
-                            block_hash: block_hash.to_string(),
+                        None => return None,
+                    };
+                    Some((
+                        address.to_string(),
+                        AddressStatus {
+                            amount: utxo.amount_sat as i64,
+                            block_hash: utxo.block_hash.to_string(),
+                            tx: utxo.outpoint.txid.to_string(),
                             confirmed: true,
                         },
-                    };
-
-                    (s.address.to_string(), status)
+                    ))
                 })
                 .collect(),
         }))
@@ -262,7 +272,7 @@ where
 
         let utxos = self
             .chain_repository
-            .get_utxos(&swap_state.swap.public.address)
+            .get_utxos_for_address(&swap_state.swap.public.address)
             .await?;
 
         if utxos.is_empty() {
