@@ -3,7 +3,7 @@ use bitcoin::{
     Address, Network, PublicKey,
 };
 use lightning_invoice::Bolt11Invoice;
-use std::fmt::Debug;
+use std::{fmt::Debug, time::SystemTime};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, field, instrument, trace, warn};
@@ -15,7 +15,7 @@ use crate::{
     },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, PayError},
-    public_server::swap_api::AddressStatus,
+    public_server::swap_api::AddressStatus, swap::PaymentAttempt,
 };
 
 use crate::swap::{
@@ -331,6 +331,7 @@ where
         };
 
         // TODO: Add ability to charge a fee?
+        // Sum the utxo amounts.
         let amount_sum_sat = utxos.iter().fold(0u64, |sum, utxo| sum + utxo.amount_sat);
         if amount_sum_sat != amount_sat {
             trace!(
@@ -343,6 +344,8 @@ where
             ));
         }
 
+        // Do a fee estimation with 6 blocks in order to check whether the swap
+        // is redeemable within reasonable time.
         let fee_estimate = self.fee_estimator.estimate_fee(6).await?;
         let fake_address = Address::p2wpkh(
             &PublicKey::from_slice(&[0x04; 33]).map_err(|e| {
@@ -371,9 +374,26 @@ where
                 Status::failed_precondition("value too low")
             })?;
 
-        // TODO: Insert payment?
+        // Store the payment attempt to ensure not 'too many' utxos are claimed
+        // on redeem if a user accidentally sends multiple utxos to the same 
+        // address.
+        self.swap_repository.add_payment_attempt(&PaymentAttempt {
+            amount_msat,
+            creation_time: SystemTime::now(),
+            destination: invoice.get_payee_pub_key(),
+            payment_request: req.payment_request.clone(),
+            payment_hash: swap_state.swap.public.hash,
+            utxos,
+        }).await?;
 
+        // Pay the user. After the payment succeeds, we will have paid the
+        // funds, but not redeemed anything onchain yet. That will happen in the
+        // redeem module.
         let preimage = self.lightning_client.pay(req.payment_request).await?;
+
+        // Persist the preimage right away. There's also a background service
+        // checking for preimages, in case the `pay` call failed, but the
+        // payment did succeed.
         match self
             .swap_repository
             .add_preimage(&swap_state.swap, &preimage)

@@ -1,12 +1,21 @@
 
 DROP TABLE filter_addresses;
-DROP TABLE spent_utxos;
-DROP INDEX address_utxos_block_hash_idx;
-DROP INDEX address_utxos_address_idx;
-DROP TABLE address_utxos;
+DROP INDEX tx_inputs_tx_id_output_index;
+DROP TABLE tx_inputs;
+DROP INDEX tx_blocks_block_hash_idx;
+DROP INDEX tx_blocks_tx_id_output_index_idx;
+DROP TABLE tx_blocks;
+DROP INDEX tx_outputs_address_idx;
+DROP TABLE tx_outputs;
 DROP TABLE watch_addresses;
 DROP INDEX blocks_height_idx;
 DROP TABLE blocks;
+DROP INDEX payment_attempt_tx_outputs_payment_attempt_id_idx;
+DROP TABLE payment_attempt_tx_outputs;
+DROP INDEX payment_attempts_destination_idx;
+DROP INDEX payment_attempts_payment_request_idx;
+DROP INDEX payment_attempts_swap_payment_hash_idx;
+DROP TABLE payment_attempts;
 DROP INDEX swaps_address_idx;
 DROP INDEX swaps_payment_hash_key;
 DROP TABLE swaps;

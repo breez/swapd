@@ -2,9 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Network, OutPoint};
 use futures::TryStreamExt;
-use sqlx::{PgPool, Row};
+use sqlx::{PgConnection, PgPool, Row};
+use tracing::instrument;
 
-use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentUtxo, Utxo};
+use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentTxo, Utxo};
 
 #[derive(Debug)]
 pub struct ChainRepository {
@@ -16,12 +17,110 @@ impl ChainRepository {
     pub fn new(pool: Arc<PgPool>, network: Network) -> Self {
         Self { pool, network }
     }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn add_utxos(
+        &self,
+        tx: &mut PgConnection,
+        tx_outputs: &[AddressUtxo],
+    ) -> Result<(), ChainRepositoryError> {
+        let tx_ids: Vec<_> = tx_outputs
+            .iter()
+            .map(|u| u.utxo.outpoint.txid.to_string())
+            .collect();
+        let output_indices: Vec<_> = tx_outputs
+            .iter()
+            .map(|u| u.utxo.outpoint.vout as i64)
+            .collect();
+        let addresses: Vec<_> = tx_outputs.iter().map(|u| u.address.to_string()).collect();
+        let amounts: Vec<_> = tx_outputs
+            .iter()
+            .map(|u| u.utxo.amount_sat as i64)
+            .collect();
+        sqlx::query(
+            r#"INSERT INTO tx_outputs (
+                   tx_id
+               ,   output_index
+               ,   address
+               ,   amount)
+               SELECT t.address, t.tx_id, t.output_index, t.amount
+               FROM UNNEST(
+                   $1::text[]
+               ,   $2::bigint[]
+               ,   $3::text[]
+               ,   $4::bigint[]
+               ) AS t(tx_id, output_index, address, amount)
+               INNER JOIN watch_addresses w ON w.address = t.address
+               ON CONFLICT DO NOTHING"#,
+        )
+        .bind(&tx_ids)
+        .bind(&output_indices)
+        .bind(&addresses)
+        .bind(&amounts)
+        .execute(tx)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn mark_spent(
+        &self,
+        tx: &mut PgConnection,
+        txos: &[SpentTxo],
+    ) -> Result<(), ChainRepositoryError> {
+        let tx_ids: Vec<_> = txos.iter().map(|u| u.outpoint.txid.to_string()).collect();
+        let tx_output_indices: Vec<_> = txos.iter().map(|u| u.outpoint.vout as i64).collect();
+        let spending_tx_ids: Vec<_> = txos.iter().map(|u| u.spending_tx.to_string()).collect();
+        let spending_tx_input_indices: Vec<_> =
+            txos.iter().map(|u| u.spending_input_index as i64).collect();
+
+        sqlx::query(
+            r#"INSERT INTO tx_inputs (
+                   tx_id
+               ,   output_index
+               ,   spending_tx_id
+               ,   spending_input_index)
+               SELECT i.tx_id
+               ,      i.output_index
+               ,      i.spending_tx_id
+               ,      i.spending_input_index
+               FROM UNNEST(
+                   $1::text[]
+               ,   $2::bigint[]
+               ,   $3::text[]
+               ,   $4::bigint[]
+               ) AS i (
+                   tx_id
+               ,   output_index
+               ,   spending_tx_id
+               ,   spending_input_index)
+               INNER JOIN tx_outputs o 
+                   ON i.tx_id = o.tx_id AND i.output_index = o.output_index
+               ON CONFLICT DO NOTHING"#,
+        )
+        .bind(&tx_ids)
+        .bind(&tx_output_indices)
+        .bind(&spending_tx_ids)
+        .bind(&spending_tx_input_indices)
+        .execute(tx)
+        .await?;
+
+        Ok(())
+    }
 }
 
 // TODO: Ensure when the block is detached, 'things' are no longer returned in queries.
 #[async_trait::async_trait]
 impl chain::ChainRepository for ChainRepository {
-    async fn add_block(&self, block: &BlockHeader) -> Result<(), ChainRepositoryError> {
+    #[instrument(level = "trace", skip(self))]
+    async fn add_block(
+        &self,
+        block: &BlockHeader,
+        tx_outputs: &[AddressUtxo],
+        tx_inputs: &[SpentTxo],
+    ) -> Result<(), ChainRepositoryError> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"INSERT INTO blocks (block_hash, prev_block_hash, height)
                VALUES ($1, $2, $3)
@@ -30,11 +129,48 @@ impl chain::ChainRepository for ChainRepository {
         .bind(block.hash.to_string())
         .bind(block.prev.to_string())
         .bind(block.height as i64)
+        .execute(&mut *tx)
+        .await?;
+
+        self.add_utxos(&mut *tx, tx_outputs).await?;
+        self.mark_spent(&mut *tx, tx_inputs).await?;
+
+        // correlate the transactions to the blocks
+        let mut txns: Vec<_> = tx_outputs
+            .iter()
+            .map(|o| o.utxo.outpoint.txid.to_string())
+            .chain(tx_inputs.iter().map(|i| i.outpoint.txid.to_string()))
+            .collect();
+        txns.dedup();
+        let block_hashes: Vec<_> = txns.iter().map(|_| block.hash.to_string()).collect();
+        sqlx::query(
+            r#"INSERT INTO tx_blocks
+               SELECT i.tx_id
+               ,      i.block_hash
+               FROM UNNEST(
+                   $1::text[]
+               ,   $2::text[]
+               ) AS i (
+                   tx_id
+               ,   block_hash
+               ,   spending_tx_id)
+               WHERE EXISTS (SELECT 1
+                             FROM tx_outputs o
+                             WHERE o.tx_id = i.tx_id)
+                   OR EXISTS (SELECT 1
+                              FROM tx_inputs i
+                              WHERE i.spending_tx_id = i.tx_id)"#,
+        )
+        .bind(&txns)
+        .bind(&block_hashes)
         .execute(&*self.pool)
         .await?;
 
+        tx.commit().await?;
         Ok(())
     }
+
+    #[instrument(level = "trace", skip(self))]
     async fn add_watch_address(&self, address: &Address) -> Result<(), ChainRepositoryError> {
         sqlx::query(
             r#"INSERT INTO watch_addresses (address)
@@ -47,6 +183,8 @@ impl chain::ChainRepository for ChainRepository {
 
         Ok(())
     }
+
+    #[instrument(level = "trace", skip(self))]
     async fn add_watch_addresses(&self, addresses: &[Address]) -> Result<(), ChainRepositoryError> {
         let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
         sqlx::query(
@@ -60,65 +198,8 @@ impl chain::ChainRepository for ChainRepository {
 
         Ok(())
     }
-    async fn add_utxo(&self, utxo: &AddressUtxo) -> Result<(), ChainRepositoryError> {
-        sqlx::query(
-            r#"INSERT INTO address_utxos (
-                   address
-               ,   tx_id
-               ,   output_index
-               ,   amount
-               ,   block_hash)
-               VALUES ($1, $2, $3, $4, $5)"#,
-        )
-        .bind(utxo.address.to_string())
-        .bind(utxo.utxo.outpoint.txid.to_string())
-        .bind(utxo.utxo.outpoint.vout as i64)
-        .bind(utxo.utxo.amount_sat as i64)
-        .bind(utxo.utxo.block_hash.to_string())
-        .execute(&*self.pool)
-        .await?;
 
-        Ok(())
-    }
-    async fn add_utxos(&self, utxos: &[AddressUtxo]) -> Result<(), ChainRepositoryError> {
-        let addresses: Vec<_> = utxos.iter().map(|u| u.address.to_string()).collect();
-        let tx_ids: Vec<_> = utxos
-            .iter()
-            .map(|u| u.utxo.outpoint.txid.to_string())
-            .collect();
-        let output_indices: Vec<_> = utxos.iter().map(|u| u.utxo.outpoint.vout as i64).collect();
-        let amounts: Vec<_> = utxos.iter().map(|u| u.utxo.amount_sat as i64).collect();
-        let block_hashes: Vec<_> = utxos
-            .iter()
-            .map(|u| u.utxo.block_hash.to_string())
-            .collect();
-        sqlx::query(
-            r#"INSERT INTO address_utxos (
-                   address
-               ,   tx_id
-               ,   output_index
-               ,   amount
-               ,   block_hash)
-               SELECT t.address, t.tx_id, t.output_index, t.amount, t.block_hash 
-               FROM UNNEST(
-                   $1::text[]
-               ,   $2::text[]
-               ,   $3::bigint[]
-               ,   $4::bigint[]
-               ,   $5::text[]
-               ) AS t(address, tx_id, output_index, amount, block_hash)
-               INNER JOIN watch_addresses w ON w.address = t.address"#,
-        )
-        .bind(&addresses)
-        .bind(&tx_ids)
-        .bind(&output_indices)
-        .bind(&amounts)
-        .bind(&block_hashes)
-        .execute(&*self.pool)
-        .await?;
-
-        Ok(())
-    }
+    #[instrument(level = "trace", skip(self))]
     async fn filter_watch_addresses(
         &self,
         addresses: &[Address],
@@ -142,6 +223,8 @@ impl chain::ChainRepository for ChainRepository {
         }
         Ok(result)
     }
+
+    #[instrument(level = "trace", skip(self))]
     async fn get_block_headers(&self) -> Result<Vec<BlockHeader>, ChainRepositoryError> {
         let mut rows = sqlx::query(
             r#"SELECT block_hash
@@ -167,20 +250,70 @@ impl chain::ChainRepository for ChainRepository {
         Ok(result)
     }
 
+    #[instrument(level = "trace", skip(self))]
+    async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError> {
+        // TODO: Should tx_inputs also be filtered on whether they're in a block??
+        let mut rows = sqlx::query(
+            r#"SELECT o.address
+               ,      o.tx_id
+               ,      o.output_index
+               ,      o.amount
+               ,      b.block_hash
+               ,      b.height
+               FROM tx_outputs o
+               INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
+               INNER JOIN blocks b ON tb.block_hash = b.block_hash
+               WHERE NOT EXISTS (SELECT 1 
+                                 FROM tx_inputs i
+                                 WHERE o.tx_id = i.tx_id 
+                                    AND o.output_index = i.output_index)
+               ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
+        )
+        .fetch(&*self.pool);
+
+        let mut result: Vec<AddressUtxo> = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let address: String = row.try_get("address")?;
+            let tx_id: String = row.try_get("tx_id")?;
+            let output_index: i64 = row.try_get("output_index")?;
+            let amount: i64 = row.try_get("amount")?;
+            let block_hash: String = row.try_get("block_hash")?;
+            let height: i64 = row.try_get("height")?;
+            let utxo = Utxo {
+                block_hash: block_hash.parse()?,
+                block_height: height as u64,
+                outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
+                amount_sat: amount as u64,
+            };
+
+            let address = address
+                .parse::<Address<NetworkUnchecked>>()?
+                .require_network(self.network)?;
+            result.push(AddressUtxo { address, utxo });
+        }
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn get_utxos_for_address(
         &self,
         address: &Address,
     ) -> Result<Vec<Utxo>, ChainRepositoryError> {
         let mut rows = sqlx::query(
-            r#"SELECT u.tx_id
-               ,      u.output_index
-               ,      u.amount
-               ,      b.block_hash
-               ,      b.height
-               FROM address_utxos u
-               INNER JOIN blocks b ON u.block_hash = b.block_hash
-               WHERE u.address = $1
-               ORDER BY b.height, u.tx_id, u.output_index"#,
+            r#"SELECT o.tx_id
+            ,         o.output_index
+            ,         o.amount
+            ,         b.block_hash
+            ,         b.height
+            FROM tx_outputs o
+            INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
+            INNER JOIN blocks b ON tb.block_hash = b.block_hash
+            WHERE address = $1 AND NOT EXISTS (
+                SELECT 1 
+                FROM tx_inputs i
+                WHERE o.tx_id = i.tx_id 
+                    AND o.output_index = i.output_index)
+            ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
         )
         .bind(address.to_string())
         .fetch(&*self.pool);
@@ -203,22 +336,27 @@ impl chain::ChainRepository for ChainRepository {
         Ok(result)
     }
 
+    #[instrument(level = "trace", skip(self))]
     async fn get_utxos_for_addresses(
         &self,
         addresses: &[Address],
     ) -> Result<HashMap<Address, Vec<Utxo>>, ChainRepositoryError> {
         let addresses: Vec<_> = addresses.iter().map(|a| a.to_string()).collect();
         let mut rows = sqlx::query(
-            r#"SELECT u.address
-               ,      u.tx_id
-               ,      u.output_index
-               ,      u.amount
-               ,      b.block_hash
-               ,      b.height
-               FROM address_utxos u
-               INNER JOIN blocks b ON u.block_hash = b.block_hash
-               WHERE u.address = ANY($1)
-               ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
+            r#"SELECT o.address
+            ,         o.tx_id
+            ,         o.output_index
+            ,         o.amount
+            ,         b.block_hash
+            ,         b.height
+            FROM tx_outputs o
+            INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
+            INNER JOIN blocks b ON tb.block_hash = b.block_hash
+            WHERE address = ANY($1) AND NOT EXISTS (SELECT 1 
+                FROM tx_inputs i
+                WHERE o.tx_id = i.tx_id 
+                    AND o.output_index = i.output_index)
+            ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
         )
         .bind(&addresses)
         .fetch(&*self.pool);
@@ -249,41 +387,7 @@ impl chain::ChainRepository for ChainRepository {
         Ok(result)
     }
 
-    async fn mark_spent(&self, utxos: &[SpentUtxo]) -> Result<(), ChainRepositoryError> {
-        let spending_tx_ids: Vec<_> = utxos.iter().map(|u| u.spending_tx.to_string()).collect();
-        let spending_block_hashes: Vec<_> =
-            utxos.iter().map(|u| u.spending_block.to_string()).collect();
-        let utxo_td_ids: Vec<_> = utxos.iter().map(|u| u.outpoint.txid.to_string()).collect();
-        let utxo_output_indices: Vec<_> = utxos.iter().map(|u| u.outpoint.vout as i64).collect();
-        sqlx::query(
-            r#"INSERT INTO spent_utxos (
-                           utxo_id
-                       ,   spending_tx_id
-                       ,   spending_block_hash)
-                       SELECT a.utxo_id, t.spending_tx_id, t.spending_block_hash
-                       FROM UNNEST(
-                           $1::text[]
-                       ,   $2::text[]
-                       ,   $3::text[]
-                       ,   $4::bigint[]
-                       ) AS t(
-                           spending_tx_id
-                       ,   spending_block_hash
-                       ,   utxo_tx_id
-                       ,   utxo_output_index)
-                       INNER JOIN address_utxos a 
-                           ON t.utxo_tx_id = a.tx_id 
-                               AND t.utxo_output_index = a.output_index"#,
-        )
-        .bind(&spending_tx_ids)
-        .bind(&spending_block_hashes)
-        .bind(&utxo_td_ids)
-        .bind(&utxo_output_indices)
-        .execute(&*self.pool)
-        .await?;
-
-        Ok(())
-    }
+    #[instrument(level = "trace", skip(self))]
     async fn undo_block(&self, hash: BlockHash) -> Result<(), ChainRepositoryError> {
         sqlx::query("DELETE FROM blocks WHERE block_hash = $1")
             .bind(hash.to_string())

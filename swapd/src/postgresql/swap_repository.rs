@@ -5,17 +5,17 @@ use std::{
 };
 
 use bitcoin::{
-    address::NetworkUnchecked,
-    hashes::{sha256, Hash},
-    Address, Network, PrivateKey, PublicKey, ScriptBuf,
+    address::NetworkUnchecked, hashes::{sha256, Hash}, secp256k1, Address, Network, PrivateKey, PublicKey, ScriptBuf
 };
 use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
 use tracing::instrument;
 
-use crate::swap::{
-    AddPreimageError, GetSwapError, GetSwapsError, Swap, SwapPersistenceError, SwapPrivateData,
-    SwapPublicData, SwapState,
+use crate::{
+    chain::Utxo,
+    swap::{
+        AddPreimageError, GetSwapError, GetSwapsError, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState
+    },
 };
 
 #[derive(Debug)]
@@ -55,6 +55,43 @@ impl crate::swap::SwapRepository for SwapRepository {
         .execute(&*self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn add_payment_attempt(
+        &self,
+        attempt: &PaymentAttempt,
+    ) -> Result<(), SwapPersistenceError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(r#"
+            INSERT INTO payment_attempts (swap_payment_hash
+            ,                             creation_time
+            ,                             amount_msat
+            ,                             payment_request
+            ,                             destination)
+            VALUES($1, $2, $3, $4, $5)
+            "#)
+            .bind(attempt.payment_hash.to_byte_array().to_vec())
+            .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+            .bind(attempt.amount_msat as i64)
+            .bind(&attempt.payment_request)
+            .bind(attempt.destination.serialize().to_vec())
+            .execute(&mut *tx)
+            .await?;
+
+        // Now store the used utxos.
+        let tx_ids: Vec<_> = attempt.utxos.iter().map(|u|u.outpoint.txid.to_string()).collect();
+        let output_indices: Vec<_> = attempt.utxos.iter().map(|u|u.outpoint.vout as i64).collect();
+        sqlx::query(
+            r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
+               SELECT t.tx_id, t.output_index
+               FROM UNNEST($1::text[], $2::bigint[]) 
+                   AS t(tx_id, output_index)"#)
+            .bind(&tx_ids)
+            .bind(&output_indices)
+            .execute(&mut *tx)
+            .await?;
         Ok(())
     }
 

@@ -4,7 +4,7 @@ use bitcoin::{block::Bip34Error, Address, Block, BlockHash, Network, OutPoint};
 use futures::future::{FusedFuture, FutureExt};
 use tracing::debug;
 
-use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentUtxo, Utxo};
+use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Utxo};
 
 use super::{types::BlockHeader, ChainError, ChainRepositoryError};
 
@@ -54,7 +54,9 @@ where
                             .await?;
                     }
 
-                    self.chain_repository.add_block(&birthday_header).await?;
+                    self.chain_repository
+                        .add_block(&birthday_header, &Vec::new(), &Vec::new())
+                        .await?;
                     let mut chain = Chain::new(birthday_header.hash);
                     chain.blocks.insert(
                         birthday_header.hash,
@@ -162,7 +164,7 @@ where
         let block_hash = block.block_hash();
         let prev_block_hash = block.header.prev_blockhash;
         let block_height = block.bip34_block_height()?;
-        let mut spent_utxos = Vec::new();
+        let mut spent_txos = Vec::new();
         let mut addresses = Vec::new();
         let mut address_utxos = HashMap::new();
         for tx in &block.txdata {
@@ -174,10 +176,10 @@ where
                 entry.push((OutPoint::new(txid, vout as u32), output.value));
             }
 
-            for input in &tx.input {
-                spent_utxos.push(SpentUtxo {
-                    spending_block: block_hash,
+            for (vin, input) in tx.input.iter().enumerate() {
+                spent_txos.push(SpentTxo {
                     spending_tx: txid,
+                    spending_input_index: vin as u32,
                     outpoint: input.previous_output,
                 });
             }
@@ -206,14 +208,16 @@ where
             })
             .flat_map(|a: Vec<AddressUtxo>| a)
             .collect();
-        self.chain_repository.add_utxos(&watch_utxos).await?;
-        self.chain_repository.mark_spent(&spent_utxos).await?;
         self.chain_repository
-            .add_block(&BlockHeader {
-                hash: block_hash,
-                height: block_height,
-                prev: prev_block_hash,
-            })
+            .add_block(
+                &BlockHeader {
+                    hash: block_hash,
+                    height: block_height,
+                    prev: prev_block_hash,
+                },
+                &watch_utxos,
+                &spent_txos,
+            )
             .await?;
         Ok(())
     }

@@ -20,10 +20,11 @@ mod bitcoind;
 mod chain;
 mod chain_filter;
 mod cln;
+mod internal_server;
 mod lightning;
 mod postgresql;
-mod internal_server;
 mod public_server;
+mod redeem;
 mod swap;
 mod whatthefee;
 
