@@ -389,6 +389,7 @@ where
         // Pay the user. After the payment succeeds, we will have paid the
         // funds, but not redeemed anything onchain yet. That will happen in the
         // redeem module.
+        // TODO: Add a maximum fee here?
         let preimage = self.lightning_client.pay(req.payment_request).await?;
 
         // Persist the preimage right away. There's also a background service

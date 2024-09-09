@@ -133,6 +133,9 @@ impl chain::ChainRepository for ChainRepository {
         .await?;
 
         self.add_utxos(&mut *tx, tx_outputs).await?;
+
+        // TODO: Ensure the transaction isolation level picks up on the newly
+        // added utxos above too.
         self.mark_spent(&mut *tx, tx_inputs).await?;
 
         // correlate the transactions to the blocks
