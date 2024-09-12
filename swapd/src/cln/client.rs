@@ -1,9 +1,13 @@
-use tonic::{transport::Uri, Request};
+use bitcoin::hashes::{sha256, Hash};
+use futures::{stream::FuturesUnordered, StreamExt};
+use regex::Regex;
+use tokio::join;
+use tonic::{transport::{Channel, Uri}, Request, Status};
 use tracing::{debug, error, instrument, warn};
 
-use crate::lightning::{LightningClient, PayError, PaymentResult};
+use crate::lightning::{LightningClient, PayError, PaymentRequest, PaymentResult};
 
-use super::cln_api::{node_client::NodeClient, pay_response::PayStatus, PayRequest};
+use super::cln_api::{listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus, ListsendpaysRequest, PayRequest, WaitsendpayRequest};
 
 #[derive(Debug)]
 pub struct Client {
@@ -19,7 +23,7 @@ impl Client {
 #[async_trait::async_trait]
 impl LightningClient for Client {
     #[instrument(level = "trace", skip(self))]
-    async fn pay(&self, label: String, bolt11: String) -> Result<PaymentResult, PayError> {
+    async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, PayError> {
         let mut client = match NodeClient::connect(self.address.clone()).await {
             Ok(client) => client,
             Err(e) => {
@@ -30,16 +34,19 @@ impl LightningClient for Client {
         // TODO: Properly map the response here.
         let pay_resp = match client
             .pay(Request::new(PayRequest {
-                label: Some(label),
-                bolt11,
+                label: Some(request.label),
+                bolt11: request.bolt11,
                 ..Default::default()
             }))
             .await
         {
             Ok(resp) => resp,
             Err(e) => {
-                debug!("failed to pay: {:?}", e);
-                return Err(e.into());
+                debug!("pay returned error {:?}", e);
+                return match wait_payment(&mut client, request.payment_hash).await? {
+                    Some(preimage) => Ok(preimage),
+                    None => Ok(PaymentResult::Failure { error: "unknown failure".to_string() }),
+                };
             }
         }
         .into_inner();
@@ -51,11 +58,106 @@ impl LightningClient for Client {
                 })?;
                 PaymentResult::Success { preimage }
               },
-            PayStatus::Pending => todo!(),
-            PayStatus::Failed => todo!(),
+            PayStatus::Pending => {
+                warn!("payment is pending after pay returned");
+                return match wait_payment(&mut client, request.payment_hash).await? {
+                    Some(result) => Ok(result),
+                    None => Ok(PaymentResult::Failure { error: "unknown failure".to_string() }),
+                };
+            },
+            PayStatus::Failed => {
+                if let Some(warning) = pay_resp.warning_partial_completion {
+                    warn!("pay returned partial completion: {}", warning);
+                    return match wait_payment(&mut client, request.payment_hash).await? {
+                        Some(result) => Ok(result),
+                        None => Ok(PaymentResult::Failure { error: "unknown failure".to_string() }),
+                    };
+                };
+                return Ok(PaymentResult::Failure { error: "unknown failure".to_string() });
+            }
         };
         Ok(resp)
     }
+}
+
+async fn wait_payment<'a>(client: &mut NodeClient<Channel>, payment_hash: sha256::Hash) -> Result<Option<PaymentResult>, PayError> {
+    let mut client2 = client.clone();
+    let completed_payments_fut = client.list_send_pays(Request::new(ListsendpaysRequest {
+        payment_hash: Some(payment_hash.as_byte_array().to_vec()),
+        bolt11: None,
+        index: None,
+        limit: None,
+        start: None,
+        status: Some(ListsendpaysStatus::Complete.into()),
+    }));
+    let pending_payments_fut = client2.list_send_pays(Request::new(ListsendpaysRequest {
+        payment_hash: Some(payment_hash.as_byte_array().to_vec()),
+        bolt11: None,
+        index: None,
+        limit: None,
+        start: None,
+        status: Some(ListsendpaysStatus::Pending.into()),
+    }));
+    let (completed_payments, pending_payments) =
+        join!(completed_payments_fut, pending_payments_fut);
+    let (completed_payments, pending_payments) = (completed_payments?, pending_payments?);
+
+    if let Some(preimage) = completed_payments
+        .into_inner()
+        .payments
+        .into_iter()
+        .filter_map(|p| p.payment_preimage)
+        .next()
+    {
+        return Ok(Some(PaymentResult::Success{ preimage: preimage.try_into().map_err(|_|PayError::InvalidPreimage)?}));
+    }
+
+    let mut tasks = FuturesUnordered::new();
+    for payment in pending_payments.into_inner().payments {
+        let mut client = client.clone();
+        tasks.push(async move { client.wait_send_pay(Request::new(WaitsendpayRequest {
+            groupid: Some(payment.groupid),
+            partid: payment.partid,
+            payment_hash: payment_hash.as_byte_array().to_vec(),
+            timeout: None,
+        })).await });
+    }
+
+    while let Some(res) = tasks.next().await {
+        match res {
+            Ok(res) => {
+                if let Some(preimage) = res.into_inner().payment_preimage {
+                    return Ok(Some(PaymentResult::Success{ preimage: preimage.try_into().map_err(|_|PayError::InvalidPreimage)?}));
+                }
+            }
+            // TODO: Map these errors to correct error strings.
+            Err(status) => match parse_cln_error(&status) {
+                Some(code) => match code {
+                    -1 => return Err(PayError::General(status)),
+                    200 => return Err(PayError::General(status)),
+                    202 => {}
+                    203 => {}
+                    204 => {}
+                    208 => {}
+                    209 => {}
+                    _ => return Err(PayError::General(status)),
+                },
+                None => return Err(PayError::General(status)),
+            },
+        }
+    }
+
+    Ok(None)
+}
+
+fn parse_cln_error(status: &Status) -> Option<i32> {
+    let re: Regex = Regex::new(r"Some\((?<code>-?\d+)\)").unwrap();
+    re.captures(status.message())
+        .and_then(|caps| {
+            caps["code"]
+                .parse::<i32>()
+                .ok()
+        })
 }
 
 impl From<tonic::transport::Error> for PayError {

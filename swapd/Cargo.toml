@@ -12,6 +12,7 @@ futures-util = "0.3.30"
 hex = "0.4.3"
 lightning-invoice = "0.31.0"
 prost = { workspace = true }
+regex = "1.10.6"
 reqwest = { version = "0.12.5", features = ["json"] }
 ring = "0.17.8"
 serde = { version = "1.0.207", features = ["derive"] }

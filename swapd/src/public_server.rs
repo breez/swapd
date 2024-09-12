@@ -14,7 +14,7 @@ use crate::{
         FeeEstimator, Utxo,
     },
     chain_filter::ChainFilterService,
-    lightning::{LightningClient, PayError},
+    lightning::{LightningClient, PayError, PaymentRequest},
     public_server::swap_api::AddressStatus, swap::PaymentAttempt,
 };
 
@@ -398,7 +398,11 @@ where
         // funds, but not redeemed anything onchain yet. That will happen in the
         // redeem module.
         // TODO: Add a maximum fee here?
-        let pay_result = self.lightning_client.pay(label.clone(), req.payment_request).await?;
+        let pay_result = self.lightning_client.pay(PaymentRequest {
+            bolt11: req.payment_request,
+            payment_hash: *hash,
+            label: label.clone(),
+        }).await?;
 
         // Persist the preimage right away. There's also a background service
         // checking for preimages, in case the `pay` call failed, but the
