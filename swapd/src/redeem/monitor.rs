@@ -55,7 +55,7 @@ where
                     None => continue,
                 };
 
-                let preimage = match swap.preimage {
+                let _preimage = match swap.preimage {
                     Some(preimage) => preimage,
                     None => continue,
                 };

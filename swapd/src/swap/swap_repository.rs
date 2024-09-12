@@ -4,6 +4,7 @@ use bitcoin::{hashes::sha256, secp256k1, Address};
 use thiserror::Error;
 
 use crate::chain::Utxo;
+use crate::lightning::PaymentResult;
 
 use super::{swap_service::Swap, SwapState};
 
@@ -16,6 +17,11 @@ pub enum SwapPersistenceError {
 #[derive(Debug)]
 pub enum AddPreimageError {
     DoesNotExist,
+    General(Box<dyn std::error::Error>),
+}
+
+#[derive(Debug)]
+pub enum AddPaymentResultError {
     General(Box<dyn std::error::Error>),
 }
 
@@ -37,6 +43,7 @@ pub enum GetSwapsError {
 #[derive(Debug)]
 pub struct PaymentAttempt {
     pub creation_time: SystemTime,
+    pub label: String,
     pub payment_hash: sha256::Hash,
     pub utxos: Vec<Utxo>,
     pub amount_msat: u64,
@@ -51,7 +58,7 @@ pub trait SwapRepository {
         &self,
         attempt: &PaymentAttempt,
     ) -> Result<(), SwapPersistenceError>;
-    async fn add_preimage(&self, swap: &Swap, preimage: &[u8; 32]) -> Result<(), AddPreimageError>;
+    async fn add_payment_result(&self, hash: &sha256::Hash, label: &str, result: &PaymentResult) -> Result<(), AddPaymentResultError>;
     async fn get_swap(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
     async fn get_swaps(
         &self,

@@ -3,7 +3,7 @@ use bitcoin::{
     Address, Network, PublicKey,
 };
 use lightning_invoice::Bolt11Invoice;
-use std::{fmt::Debug, time::SystemTime};
+use std::{fmt::Debug, time::{SystemTime, UNIX_EPOCH}};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, field, instrument, trace, warn};
@@ -263,9 +263,10 @@ where
             ));
         }
 
+        let hash = invoice.payment_hash();
         let swap_state = self
             .swap_repository
-            .get_swap(invoice.payment_hash())
+            .get_swap(hash)
             .await?;
         if swap_state.preimage.is_some() {
             trace!("swap already had preimage");
@@ -377,9 +378,16 @@ where
         // Store the payment attempt to ensure not 'too many' utxos are claimed
         // on redeem if a user accidentally sends multiple utxos to the same 
         // address.
+        let now = SystemTime::now();
+        let unix_ns_now = now.duration_since(UNIX_EPOCH).map_err(|_|{
+            error!("failed to get duration since unix epoch");
+            Status::internal("internal error")
+        })?.as_nanos();
+        let label = format!("{}-{}", hash, unix_ns_now);
         self.swap_repository.add_payment_attempt(&PaymentAttempt {
             amount_msat,
-            creation_time: SystemTime::now(),
+            creation_time: now,
+            label: label.clone(),
             destination: invoice.get_payee_pub_key(),
             payment_request: req.payment_request.clone(),
             payment_hash: swap_state.swap.public.hash,
@@ -390,22 +398,22 @@ where
         // funds, but not redeemed anything onchain yet. That will happen in the
         // redeem module.
         // TODO: Add a maximum fee here?
-        let preimage = self.lightning_client.pay(req.payment_request).await?;
+        let pay_result = self.lightning_client.pay(label.clone(), req.payment_request).await?;
 
         // Persist the preimage right away. There's also a background service
         // checking for preimages, in case the `pay` call failed, but the
         // payment did succeed.
         match self
             .swap_repository
-            .add_preimage(&swap_state.swap, &preimage)
+            .add_payment_result(hash, &label, &pay_result)
             .await
         {
             Ok(_) => {}
             Err(e) => {
                 error!(
                     hash = field::display(swap_state.swap.public.hash),
-                    preimage = hex::encode(preimage),
-                    "failed to persist preimage: {:?}",
+                    result = field::debug(pay_result),
+                    "failed to persist pay result: {:?}",
                     e
                 );
             }

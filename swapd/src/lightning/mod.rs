@@ -1,2 +1,2 @@
 mod client;
-pub use client::{LightningClient, PayError};
+pub use client::{LightningClient, PayError, PaymentResult};

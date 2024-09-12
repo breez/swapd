@@ -5,16 +5,16 @@ use std::{
 };
 
 use bitcoin::{
-    address::NetworkUnchecked, hashes::{sha256, Hash}, secp256k1, Address, Network, PrivateKey, PublicKey, ScriptBuf
+    address::NetworkUnchecked, hashes::{sha256, Hash}, Address, Network, PrivateKey, PublicKey, ScriptBuf
 };
 use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
 use tracing::instrument;
 
 use crate::{
-    chain::Utxo,
+    lightning::PaymentResult,
     swap::{
-        AddPreimageError, GetSwapError, GetSwapsError, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState
+        AddPaymentResultError, AddPreimageError, GetSwapError, GetSwapsError, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState
     },
 };
 
@@ -47,7 +47,7 @@ impl crate::swap::SwapRepository for SwapRepository {
         )
         .bind(swap.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
         .bind(swap.public.payer_pubkey.to_bytes())
-        .bind(swap.public.hash.to_byte_array().to_vec())
+        .bind(swap.public.hash.as_byte_array().to_vec())
         .bind(swap.public.script.to_bytes())
         .bind(swap.public.address.to_string())
         .bind(swap.public.lock_time as i64)
@@ -66,13 +66,15 @@ impl crate::swap::SwapRepository for SwapRepository {
         let mut tx = self.pool.begin().await?;
         sqlx::query(r#"
             INSERT INTO payment_attempts (swap_payment_hash
+            ,                             label
             ,                             creation_time
             ,                             amount_msat
             ,                             payment_request
             ,                             destination)
             VALUES($1, $2, $3, $4, $5)
             "#)
-            .bind(attempt.payment_hash.to_byte_array().to_vec())
+            .bind(attempt.payment_hash.as_byte_array().to_vec())
+            .bind(&attempt.label)
             .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
             .bind(attempt.amount_msat as i64)
             .bind(&attempt.payment_request)
@@ -96,15 +98,27 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn add_preimage(&self, swap: &Swap, preimage: &[u8; 32]) -> Result<(), AddPreimageError> {
-        let result = sqlx::query("UPDATE swaps SET preimage = $1 WHERE payment_hash = $2")
-            .bind(preimage.to_vec())
-            .bind(swap.public.hash.to_byte_array().to_vec())
-            .execute(&*self.pool)
-            .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(AddPreimageError::DoesNotExist);
+    async fn add_payment_result(&self, hash: &sha256::Hash, label: &str, result: &PaymentResult) -> Result<(), AddPaymentResultError> {
+        match result {
+            PaymentResult::Success { preimage } => {
+                sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
+                    .bind(preimage.to_vec())
+                    .bind(hash.as_byte_array().to_vec())
+                    .execute(&*self.pool)
+                    .await?;
+                
+                sqlx::query(r#"UPDATE payment_attempts SET success = 1 WHERE label = $1"#)
+                    .bind(label)
+                    .execute(&*self.pool)
+                    .await?;
+            },
+            PaymentResult::Failure { error } => {
+                sqlx::query(r#"UPDATE payment_attempts SET success = 0, error = $1 WHERE label = $2"#)
+                    .bind(error)
+                    .bind(label)
+                    .execute(&*self.pool)
+                    .await?;
+            },
         }
 
         Ok(())
@@ -124,7 +138,7 @@ impl crate::swap::SwapRepository for SwapRepository {
                FROM swaps s
                WHERE s.payment_hash = $1"#,
         )
-        .bind(hash.to_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .fetch_optional(&*self.pool)
         .await?;
 
@@ -325,5 +339,11 @@ impl From<bitcoin::key::Error> for GetSwapsError {
 impl From<sqlx::Error> for GetSwapsError {
     fn from(value: sqlx::Error) -> Self {
         GetSwapsError::General(Box::new(value))
+    }
+}
+
+impl From<sqlx::Error> for AddPaymentResultError {
+    fn from(value: sqlx::Error) -> Self {
+        AddPaymentResultError::General(Box::new(value))
     }
 }

@@ -20,6 +20,7 @@ CREATE INDEX swaps_address_idx ON swaps (address);
 CREATE TABLE payment_attempts (
     id BIGSERIAL PRIMARY KEY,
     swap_payment_hash BYTEA NOT NULL REFERENCES swaps,
+    label VARCHAR NOT NULL,
     creation_time BIGINT NOT NULL,
     amount_msat BIGINT NOT NULL,
     payment_request VARCHAR NOT NULL,
@@ -29,6 +30,7 @@ CREATE TABLE payment_attempts (
 );
 
 CREATE INDEX payment_attempts_swap_payment_hash_idx ON payment_attempts(swap_payment_hash);
+CREATE INDEX payment_attempts_label_idx ON payment_attempts(label);
 CREATE INDEX payment_attempts_payment_request_idx ON payment_attempts(payment_request);
 CREATE INDEX payment_attempts_destination_idx ON payment_attempts(destination);
 

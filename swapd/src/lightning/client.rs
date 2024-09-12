@@ -4,7 +4,17 @@ pub enum PayError {
     InvalidPreimage,
 }
 
+#[derive(Debug)]
+pub enum PaymentResult {
+    Success {
+        preimage: [u8; 32],
+    },
+    Failure {
+        error: String,
+    }
+}
+
 #[async_trait::async_trait]
 pub trait LightningClient {
-    async fn pay(&self, bolt11: String) -> Result<[u8; 32], PayError>;
+    async fn pay(&self, label: String, bolt11: String) -> Result<PaymentResult, PayError>;
 }
