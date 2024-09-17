@@ -5,7 +5,9 @@ use std::{
 };
 
 use bitcoin::{
-    address::NetworkUnchecked, hashes::{sha256, Hash}, Address, Network, PrivateKey, PublicKey, ScriptBuf
+    address::NetworkUnchecked,
+    hashes::{sha256, Hash},
+    Address, Network, OutPoint, PrivateKey, PublicKey, ScriptBuf,
 };
 use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
@@ -14,7 +16,8 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, AddPreimageError, GetSwapError, GetSwapsError, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState
+        AddPaymentResultError, AddPreimageError, GetPaidUtxosError, GetSwapError, GetSwapsError,
+        PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
     },
 };
 
@@ -64,7 +67,8 @@ impl crate::swap::SwapRepository for SwapRepository {
         attempt: &PaymentAttempt,
     ) -> Result<(), SwapPersistenceError> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             INSERT INTO payment_attempts (swap_payment_hash
             ,                             label
             ,                             creation_time
@@ -72,33 +76,48 @@ impl crate::swap::SwapRepository for SwapRepository {
             ,                             payment_request
             ,                             destination)
             VALUES($1, $2, $3, $4, $5)
-            "#)
-            .bind(attempt.payment_hash.as_byte_array().to_vec())
-            .bind(&attempt.label)
-            .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
-            .bind(attempt.amount_msat as i64)
-            .bind(&attempt.payment_request)
-            .bind(attempt.destination.serialize().to_vec())
-            .execute(&mut *tx)
-            .await?;
+            "#,
+        )
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
+        .bind(&attempt.label)
+        .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+        .bind(attempt.amount_msat as i64)
+        .bind(&attempt.payment_request)
+        .bind(attempt.destination.serialize().to_vec())
+        .execute(&mut *tx)
+        .await?;
 
         // Now store the used utxos.
-        let tx_ids: Vec<_> = attempt.utxos.iter().map(|u|u.outpoint.txid.to_string()).collect();
-        let output_indices: Vec<_> = attempt.utxos.iter().map(|u|u.outpoint.vout as i64).collect();
+        let tx_ids: Vec<_> = attempt
+            .utxos
+            .iter()
+            .map(|u| u.outpoint.txid.to_string())
+            .collect();
+        let output_indices: Vec<_> = attempt
+            .utxos
+            .iter()
+            .map(|u| u.outpoint.vout as i64)
+            .collect();
         sqlx::query(
             r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
                SELECT t.tx_id, t.output_index
                FROM UNNEST($1::text[], $2::bigint[]) 
-                   AS t(tx_id, output_index)"#)
-            .bind(&tx_ids)
-            .bind(&output_indices)
-            .execute(&mut *tx)
-            .await?;
+                   AS t(tx_id, output_index)"#,
+        )
+        .bind(&tx_ids)
+        .bind(&output_indices)
+        .execute(&mut *tx)
+        .await?;
         Ok(())
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn add_payment_result(&self, hash: &sha256::Hash, label: &str, result: &PaymentResult) -> Result<(), AddPaymentResultError> {
+    async fn add_payment_result(
+        &self,
+        hash: &sha256::Hash,
+        label: &str,
+        result: &PaymentResult,
+    ) -> Result<(), AddPaymentResultError> {
         match result {
             PaymentResult::Success { preimage } => {
                 sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
@@ -106,19 +125,21 @@ impl crate::swap::SwapRepository for SwapRepository {
                     .bind(hash.as_byte_array().to_vec())
                     .execute(&*self.pool)
                     .await?;
-                
+
                 sqlx::query(r#"UPDATE payment_attempts SET success = 1 WHERE label = $1"#)
                     .bind(label)
                     .execute(&*self.pool)
                     .await?;
-            },
+            }
             PaymentResult::Failure { error } => {
-                sqlx::query(r#"UPDATE payment_attempts SET success = 0, error = $1 WHERE label = $2"#)
-                    .bind(error)
-                    .bind(label)
-                    .execute(&*self.pool)
-                    .await?;
-            },
+                sqlx::query(
+                    r#"UPDATE payment_attempts SET success = 0, error = $1 WHERE label = $2"#,
+                )
+                .bind(error)
+                .bind(label)
+                .execute(&*self.pool)
+                .await?;
+            }
         }
 
         Ok(())
@@ -187,6 +208,31 @@ impl crate::swap::SwapRepository for SwapRepository {
                 None => None,
             },
         })
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn get_paid_outpoints(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<Vec<OutPoint>, GetPaidUtxosError> {
+        let mut rows = sqlx::query(
+            r#"SELECT DISTINCT patx.tx_id
+               ,               patx.output_index
+               FROM swaps s
+               INNER JOIN payment_attempts pa ON s.payment_hash = pa.swap_payment_hash
+               INNER JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
+               WHERE pa.success = 1"#,
+        )
+        .bind(hash.as_byte_array().to_vec())
+        .fetch(&*self.pool);
+
+        let mut result = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let tx_id: String = row.try_get("tx_id")?;
+            let output_index: i64 = row.try_get("output_index")?;
+            result.push(OutPoint::new(tx_id.parse()?, output_index as u32));
+        }
+        Ok(result)
     }
 
     #[instrument(level = "trace", skip(self))]
@@ -345,5 +391,17 @@ impl From<sqlx::Error> for GetSwapsError {
 impl From<sqlx::Error> for AddPaymentResultError {
     fn from(value: sqlx::Error) -> Self {
         AddPaymentResultError::General(Box::new(value))
+    }
+}
+
+impl From<sqlx::Error> for GetPaidUtxosError {
+    fn from(value: sqlx::Error) -> Self {
+        GetPaidUtxosError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::hex::Error> for GetPaidUtxosError {
+    fn from(value: bitcoin::hashes::hex::Error) -> Self {
+        GetPaidUtxosError::General(Box::new(value))
     }
 }

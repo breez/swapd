@@ -17,12 +17,8 @@ pub struct PaymentRequest {
 
 #[derive(Debug)]
 pub enum PaymentResult {
-    Success {
-        preimage: [u8; 32],
-    },
-    Failure {
-        error: String,
-    }
+    Success { preimage: [u8; 32] },
+    Failure { error: String },
 }
 
 #[async_trait::async_trait]

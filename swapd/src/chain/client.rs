@@ -1,4 +1,4 @@
-use bitcoin::{Address, Block, BlockHash, OutPoint};
+use bitcoin::{Address, Block, BlockHash, OutPoint, Transaction};
 use thiserror::Error;
 
 use super::ChainRepositoryError;
@@ -17,6 +17,7 @@ pub enum ChainError {
 
 #[async_trait::async_trait]
 pub trait ChainClient {
+    async fn broadcast_tx(&self, tx: Transaction) -> Result<(), ChainError>;
     async fn get_blockheight(&self) -> Result<u64, ChainError>;
     async fn get_tip_hash(&self) -> Result<BlockHash, ChainError>;
     async fn get_block(&self, hash: &BlockHash) -> Result<Block, ChainError>;

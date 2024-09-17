@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use bitcoin::{
-    consensus::{deserialize, Decodable},
+    consensus::{deserialize, encode::serialize_hex, Decodable, Encodable},
     hashes::{hex::FromHex, sha256d},
     Address, Block, BlockHash, Network, OutPoint, Transaction,
 };
@@ -9,12 +9,14 @@ use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tracing::debug;
 
 use crate::chain::{BlockHeader, ChainClient, ChainError};
 
 use super::{
     GetBestBlockHashResponse, GetBlockCountResponse, GetBlockHeaderResponse, GetBlockResponse,
     GetRawTransactionResponse, RpcError, RpcRequest, RpcServerMessage, RpcServerMessageBody,
+    SendRawTransactionResponse,
 };
 
 #[derive(Debug)]
@@ -152,10 +154,32 @@ impl BitcoindClient {
             },
         )
     }
+
+    async fn sendrawtransaction(
+        &self,
+        hex: String,
+    ) -> Result<SendRawTransactionResponse, CallError> {
+        Ok(
+            match self
+                .call("sendrawtransaction", Value::Array(vec![Value::String(hex)]))
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            },
+        )
+    }
 }
 
 #[async_trait::async_trait]
 impl ChainClient for BitcoindClient {
+    async fn broadcast_tx(&self, tx: Transaction) -> Result<(), ChainError> {
+        let hex = serialize_hex(&tx);
+        debug!(tx = hex, "broadcasting tx");
+        self.sendrawtransaction(hex).await?;
+        Ok(())
+    }
+
     async fn get_blockheight(&self) -> Result<u64, ChainError> {
         Ok(self.getblockcount().await?.n)
     }

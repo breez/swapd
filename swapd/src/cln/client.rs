@@ -1,22 +1,43 @@
-use bitcoin::hashes::{sha256, Hash};
+use bitcoin::{
+    hashes::{sha256, Hash},
+    Network,
+};
 use futures::{stream::FuturesUnordered, StreamExt};
 use regex::Regex;
+use thiserror::Error;
 use tokio::join;
-use tonic::{transport::{Channel, Uri}, Request, Status};
+use tonic::{
+    transport::{Channel, Uri},
+    Request, Status,
+};
 use tracing::{debug, error, instrument, warn};
 
 use crate::lightning::{LightningClient, PayError, PaymentRequest, PaymentResult};
 
-use super::cln_api::{listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus, ListsendpaysRequest, PayRequest, WaitsendpayRequest};
+use super::cln_api::{
+    listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus,
+    ListsendpaysRequest, PayRequest, WaitsendpayRequest,
+};
 
 #[derive(Debug)]
 pub struct Client {
+    pub(super) network: Network,
     address: Uri,
 }
 
 impl Client {
-    pub fn new(address: Uri) -> Self {
-        Self { address }
+    pub fn new(address: Uri, network: Network) -> Self {
+        Self { address, network }
+    }
+
+    pub(super) async fn get_client(&self) -> Result<NodeClient<Channel>, GetClientError> {
+        match NodeClient::connect(self.address.clone()).await {
+            Ok(client) => Ok(client),
+            Err(e) => {
+                error!("failed to connect to cln: {:?}", e);
+                return Err(e.into());
+            }
+        }
     }
 }
 
@@ -24,13 +45,8 @@ impl Client {
 impl LightningClient for Client {
     #[instrument(level = "trace", skip(self))]
     async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, PayError> {
-        let mut client = match NodeClient::connect(self.address.clone()).await {
-            Ok(client) => client,
-            Err(e) => {
-                error!("failed to connect to cln: {:?}", e);
-                return Err(e.into());
-            }
-        };
+        let mut client = self.get_client().await?;
+
         // TODO: Properly map the response here.
         let pay_resp = match client
             .pay(Request::new(PayRequest {
@@ -45,7 +61,9 @@ impl LightningClient for Client {
                 debug!("pay returned error {:?}", e);
                 return match wait_payment(&mut client, request.payment_hash).await? {
                     Some(preimage) => Ok(preimage),
-                    None => Ok(PaymentResult::Failure { error: "unknown failure".to_string() }),
+                    None => Ok(PaymentResult::Failure {
+                        error: "unknown failure".to_string(),
+                    }),
                 };
             }
         }
@@ -57,30 +75,39 @@ impl LightningClient for Client {
                     PayError::InvalidPreimage
                 })?;
                 PaymentResult::Success { preimage }
-              },
+            }
             PayStatus::Pending => {
                 warn!("payment is pending after pay returned");
                 return match wait_payment(&mut client, request.payment_hash).await? {
                     Some(result) => Ok(result),
-                    None => Ok(PaymentResult::Failure { error: "unknown failure".to_string() }),
+                    None => Ok(PaymentResult::Failure {
+                        error: "unknown failure".to_string(),
+                    }),
                 };
-            },
+            }
             PayStatus::Failed => {
                 if let Some(warning) = pay_resp.warning_partial_completion {
                     warn!("pay returned partial completion: {}", warning);
                     return match wait_payment(&mut client, request.payment_hash).await? {
                         Some(result) => Ok(result),
-                        None => Ok(PaymentResult::Failure { error: "unknown failure".to_string() }),
+                        None => Ok(PaymentResult::Failure {
+                            error: "unknown failure".to_string(),
+                        }),
                     };
                 };
-                return Ok(PaymentResult::Failure { error: "unknown failure".to_string() });
+                return Ok(PaymentResult::Failure {
+                    error: "unknown failure".to_string(),
+                });
             }
         };
         Ok(resp)
     }
 }
 
-async fn wait_payment<'a>(client: &mut NodeClient<Channel>, payment_hash: sha256::Hash) -> Result<Option<PaymentResult>, PayError> {
+async fn wait_payment<'a>(
+    client: &mut NodeClient<Channel>,
+    payment_hash: sha256::Hash,
+) -> Result<Option<PaymentResult>, PayError> {
     let mut client2 = client.clone();
     let completed_payments_fut = client.list_send_pays(Request::new(ListsendpaysRequest {
         payment_hash: Some(payment_hash.as_byte_array().to_vec()),
@@ -109,25 +136,33 @@ async fn wait_payment<'a>(client: &mut NodeClient<Channel>, payment_hash: sha256
         .filter_map(|p| p.payment_preimage)
         .next()
     {
-        return Ok(Some(PaymentResult::Success{ preimage: preimage.try_into().map_err(|_|PayError::InvalidPreimage)?}));
+        return Ok(Some(PaymentResult::Success {
+            preimage: preimage.try_into().map_err(|_| PayError::InvalidPreimage)?,
+        }));
     }
 
     let mut tasks = FuturesUnordered::new();
     for payment in pending_payments.into_inner().payments {
         let mut client = client.clone();
-        tasks.push(async move { client.wait_send_pay(Request::new(WaitsendpayRequest {
-            groupid: Some(payment.groupid),
-            partid: payment.partid,
-            payment_hash: payment_hash.as_byte_array().to_vec(),
-            timeout: None,
-        })).await });
+        tasks.push(async move {
+            client
+                .wait_send_pay(Request::new(WaitsendpayRequest {
+                    groupid: Some(payment.groupid),
+                    partid: payment.partid,
+                    payment_hash: payment_hash.as_byte_array().to_vec(),
+                    timeout: None,
+                }))
+                .await
+        });
     }
 
     while let Some(res) = tasks.next().await {
         match res {
             Ok(res) => {
                 if let Some(preimage) = res.into_inner().payment_preimage {
-                    return Ok(Some(PaymentResult::Success{ preimage: preimage.try_into().map_err(|_|PayError::InvalidPreimage)?}));
+                    return Ok(Some(PaymentResult::Success {
+                        preimage: preimage.try_into().map_err(|_| PayError::InvalidPreimage)?,
+                    }));
                 }
             }
             // TODO: Map these errors to correct error strings.
@@ -153,11 +188,7 @@ async fn wait_payment<'a>(client: &mut NodeClient<Channel>, payment_hash: sha256
 fn parse_cln_error(status: &Status) -> Option<i32> {
     let re: Regex = Regex::new(r"Some\((?<code>-?\d+)\)").unwrap();
     re.captures(status.message())
-        .and_then(|caps| {
-            caps["code"]
-                .parse::<i32>()
-                .ok()
-        })
+        .and_then(|caps| caps["code"].parse::<i32>().ok())
 }
 
 impl From<tonic::transport::Error> for PayError {
@@ -169,5 +200,28 @@ impl From<tonic::transport::Error> for PayError {
 impl From<tonic::Status> for PayError {
     fn from(_value: tonic::Status) -> Self {
         PayError::ConnectionFailed
+    }
+}
+
+#[derive(Debug, Error)]
+pub(super) enum GetClientError {
+    #[error("connection failed")]
+    ConnectionFailed,
+    #[error("{0}")]
+    General(Box<dyn std::error::Error>),
+}
+
+impl From<tonic::transport::Error> for GetClientError {
+    fn from(_value: tonic::transport::Error) -> Self {
+        GetClientError::ConnectionFailed
+    }
+}
+
+impl From<GetClientError> for PayError {
+    fn from(value: GetClientError) -> Self {
+        match value {
+            GetClientError::ConnectionFailed => PayError::ConnectionFailed,
+            GetClientError::General(e) => PayError::General(Status::internal("internal error")),
+        }
     }
 }

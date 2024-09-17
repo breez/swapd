@@ -3,8 +3,11 @@ use bitcoin::{
     Address, Network, PublicKey,
 };
 use lightning_invoice::Bolt11Invoice;
-use std::{fmt::Debug, time::{SystemTime, UNIX_EPOCH}};
 use std::sync::Arc;
+use std::{
+    fmt::Debug,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, field, instrument, trace, warn};
 
@@ -15,7 +18,8 @@ use crate::{
     },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, PayError, PaymentRequest},
-    public_server::swap_api::AddressStatus, swap::PaymentAttempt,
+    public_server::swap_api::AddressStatus,
+    swap::PaymentAttempt,
 };
 
 use crate::swap::{
@@ -264,10 +268,7 @@ where
         }
 
         let hash = invoice.payment_hash();
-        let swap_state = self
-            .swap_repository
-            .get_swap(hash)
-            .await?;
+        let swap_state = self.swap_repository.get_swap(hash).await?;
         if swap_state.preimage.is_some() {
             trace!("swap already had preimage");
             return Err(Status::failed_precondition("swap already paid"));
@@ -376,33 +377,41 @@ where
             })?;
 
         // Store the payment attempt to ensure not 'too many' utxos are claimed
-        // on redeem if a user accidentally sends multiple utxos to the same 
+        // on redeem if a user accidentally sends multiple utxos to the same
         // address.
         let now = SystemTime::now();
-        let unix_ns_now = now.duration_since(UNIX_EPOCH).map_err(|_|{
-            error!("failed to get duration since unix epoch");
-            Status::internal("internal error")
-        })?.as_nanos();
+        let unix_ns_now = now
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| {
+                error!("failed to get duration since unix epoch");
+                Status::internal("internal error")
+            })?
+            .as_nanos();
         let label = format!("{}-{}", hash, unix_ns_now);
-        self.swap_repository.add_payment_attempt(&PaymentAttempt {
-            amount_msat,
-            creation_time: now,
-            label: label.clone(),
-            destination: invoice.get_payee_pub_key(),
-            payment_request: req.payment_request.clone(),
-            payment_hash: swap_state.swap.public.hash,
-            utxos,
-        }).await?;
+        self.swap_repository
+            .add_payment_attempt(&PaymentAttempt {
+                amount_msat,
+                creation_time: now,
+                label: label.clone(),
+                destination: invoice.get_payee_pub_key(),
+                payment_request: req.payment_request.clone(),
+                payment_hash: swap_state.swap.public.hash,
+                utxos,
+            })
+            .await?;
 
         // Pay the user. After the payment succeeds, we will have paid the
         // funds, but not redeemed anything onchain yet. That will happen in the
         // redeem module.
         // TODO: Add a maximum fee here?
-        let pay_result = self.lightning_client.pay(PaymentRequest {
-            bolt11: req.payment_request,
-            payment_hash: *hash,
-            label: label.clone(),
-        }).await?;
+        let pay_result = self
+            .lightning_client
+            .pay(PaymentRequest {
+                bolt11: req.payment_request,
+                payment_hash: *hash,
+                label: label.clone(),
+            })
+            .await?;
 
         // Persist the preimage right away. There's also a background service
         // checking for preimages, in case the `pay` call failed, but the

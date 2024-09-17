@@ -26,3 +26,8 @@ pub struct GetBlockCountResponse {
 pub struct GetRawTransactionResponse {
     pub str: String,
 }
+
+#[derive(Deserialize)]
+pub struct SendRawTransactionResponse {
+    pub hex: String,
+}

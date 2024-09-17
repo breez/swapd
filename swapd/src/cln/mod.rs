@@ -1,4 +1,5 @@
 mod client;
+mod wallet;
 
 pub use client::Client;
 

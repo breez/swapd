@@ -25,14 +25,14 @@ pub struct SwapState {
     pub preimage: Option<[u8; 32]>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Swap {
     pub creation_time: SystemTime,
     pub public: SwapPublicData,
     pub private: SwapPrivateData,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SwapPublicData {
     pub payer_pubkey: PublicKey,
     pub swapper_pubkey: PublicKey,
@@ -42,6 +42,7 @@ pub struct SwapPublicData {
     pub lock_time: u32,
 }
 
+#[derive(Clone)]
 pub struct SwapPrivateData {
     pub swapper_privkey: PrivateKey,
 }

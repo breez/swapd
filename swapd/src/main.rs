@@ -7,6 +7,7 @@ use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
+use redeem::RedeemMonitor;
 use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
@@ -26,6 +27,7 @@ mod postgresql;
 mod public_server;
 mod redeem;
 mod swap;
+mod wallet;
 mod whatthefee;
 
 #[derive(Parser, Debug)]
@@ -118,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.bitcoind_rpc_password,
         args.network,
     ));
-    let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address));
+    let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address, args.network));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
         Arc::clone(&pgpool),
@@ -130,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let chain_filter_repository =
         Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
+    let redeem_repository = Arc::new(postgresql::RedeemRepository::new(Arc::clone(&pgpool)));
     let chain_filter = Arc::new(ChainFilterImpl::new(
         Arc::clone(&chain_client),
         Arc::clone(&chain_filter_repository),
@@ -162,11 +165,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&chain_repository),
         Duration::from_secs(args.chain_poll_interval_seconds),
     );
+    let redeem_monitor = RedeemMonitor::new(
+        Arc::clone(&chain_client),
+        Arc::clone(&chain_repository),
+        Arc::clone(&fee_estimator),
+        Arc::clone(&swap_repository),
+        Arc::clone(&swap_service),
+        Arc::clone(&redeem_repository),
+        Arc::clone(&cln_client),
+    );
 
     let token = CancellationToken::new();
     let server_token = token.clone();
     let internal_server_token = token.clone();
     let chain_monitor_token = token.clone();
+    let redeem_monitor_token = token.clone();
     let tracker = TaskTracker::new();
 
     tokio::spawn(async move {
@@ -177,6 +190,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         token.cancel();
+    });
+    tracker.spawn(async move {
+        info!(
+            address = field::display(&args.address),
+            "Starting redeem monitor"
+        );
+        let res = redeem_monitor.start(async {
+            redeem_monitor_token.cancelled().await;
+            info!("redeem monitor shutting down");
+        }).await;
+        match res {
+            Ok(_) => info!("redeem monitor exited"),
+            Err(e) => info!("redeem monitor exited with {:?}", e),
+        };
+        redeem_monitor_token.cancel();
     });
     tracker.spawn(async move {
         info!(

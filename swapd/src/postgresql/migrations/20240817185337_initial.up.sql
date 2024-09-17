@@ -42,6 +42,8 @@ CREATE TABLE payment_attempt_tx_outputs (
 
 CREATE INDEX payment_attempt_tx_outputs_payment_attempt_id_idx
 ON payment_attempt_tx_outputs (payment_attempt_id);
+CREATE INDEX payment_attempt_tx_outputs_tx_id_output_index_idx
+ON payment_attempt_tx_outputs (tx_id, output_index);
 
 /*
     chain
@@ -90,7 +92,7 @@ CREATE TABLE tx_inputs (
     FOREIGN KEY (tx_id, output_index) REFERENCES tx_outputs (tx_id, output_index) ON DELETE CASCADE,
 );
 
-CREATE INDEX tx_inputs_tx_id_output_index ON tx_inputs(tx_id, output_index);
+CREATE INDEX tx_inputs_tx_id_output_index_idx ON tx_inputs(tx_id, output_index);
 
 /*
     chain filter
@@ -98,3 +100,21 @@ CREATE INDEX tx_inputs_tx_id_output_index ON tx_inputs(tx_id, output_index);
 CREATE TABLE filter_addresses (
     address VARCHAR PRIMARY KEY
 );
+
+/*
+    redeem
+*/
+CREATE TABLE redeems (
+    tx_id VARCHAR NOT NULL PRIMARY KEY,
+    creation_time BIGINT NOT NULL,
+    tx bytea NOT NULL,
+    destination_address VARCHAR NOT NULL,
+    fee_per_kw BIGINT NOT NULL
+);
+
+CREATE TABLE redeem_inputs (
+    redeem_tx_id VARCHAR NOT NULL REFERENCES redeems,
+    tx_id VARCHAR NOT NULL,
+    output_index BIGINT NOT NULL
+);
+CREATE INDEX redeem_inputs_redeem_tx_id_idx ON redeem_inputs(redeem_tx_id);

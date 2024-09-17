@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::SystemTime};
 
-use bitcoin::{hashes::sha256, secp256k1, Address};
+use bitcoin::{hashes::sha256, secp256k1, Address, OutPoint};
 use thiserror::Error;
 
 use crate::chain::Utxo;
@@ -22,6 +22,11 @@ pub enum AddPreimageError {
 
 #[derive(Debug)]
 pub enum AddPaymentResultError {
+    General(Box<dyn std::error::Error>),
+}
+
+#[derive(Debug)]
+pub enum GetPaidUtxosError {
     General(Box<dyn std::error::Error>),
 }
 
@@ -58,7 +63,16 @@ pub trait SwapRepository {
         &self,
         attempt: &PaymentAttempt,
     ) -> Result<(), SwapPersistenceError>;
-    async fn add_payment_result(&self, hash: &sha256::Hash, label: &str, result: &PaymentResult) -> Result<(), AddPaymentResultError>;
+    async fn add_payment_result(
+        &self,
+        hash: &sha256::Hash,
+        label: &str,
+        result: &PaymentResult,
+    ) -> Result<(), AddPaymentResultError>;
+    async fn get_paid_outpoints(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<Vec<OutPoint>, GetPaidUtxosError>;
     async fn get_swap(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
     async fn get_swaps(
         &self,
