@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
@@ -12,7 +12,7 @@ use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tonic::transport::{Server, Uri};
+use tonic::transport::{Certificate, Identity, Server, Uri};
 use tracing::{field, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use whatthefee::WhatTheFeeEstimator;
@@ -29,6 +29,46 @@ mod redeem;
 mod swap;
 mod wallet;
 mod whatthefee;
+
+#[derive(Clone, Debug)]
+enum FileOrCert {
+    File(PathBuf),
+    Cert(String),
+}
+
+#[derive(Debug)]
+enum ParseFileOrCertError {
+    Unknown
+}
+
+impl FromStr for FileOrCert {
+    type Err = ParseFileOrCertError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(p) = s.parse::<PathBuf>() {
+            return Ok(Self::File(p))
+        }
+
+        Ok(Self::Cert(String::from(s)))
+    }
+}
+
+impl From<std::string::String> for FileOrCert {
+    fn from(value: std::string::String) -> Self {
+        value.parse().unwrap()
+    }
+}
+
+impl FileOrCert {
+    async fn resolve<T, TError>(&self) -> Result<String, std::io::Error> {
+        Ok(match self {
+            FileOrCert::File(path_buf) => {
+                tokio::fs::read_to_string(&path_buf).await?
+            },
+            FileOrCert::Cert(content) => content.to_owned(),
+        })
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -72,6 +112,21 @@ struct Args {
     /// Address to the cln grpc api.
     #[arg(long)]
     pub cln_grpc_address: Uri,
+
+	/// Client key for grpc access. Can either be a file path or the key
+	/// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
+    #[arg(long)]
+    pub cln_grpc_ca_cert: FileOrCert,
+
+    /// Client cert for grpc access. Can either be a file path or the cert
+	/// contents. Typically stored in `lightningd-dir/{network}/client.pem`.
+    #[arg(long)]
+    pub cln_grpc_client_cert: FileOrCert,
+
+    /// Client key for grpc access. Can either be a file path or the key
+	/// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
+    #[arg(long)]
+    pub cln_grpc_client_key: FileOrCert,
 
     /// Loglevel to use. Can be used to filter loges through the env filter
     /// format.
@@ -120,7 +175,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.bitcoind_rpc_password,
         args.network,
     ));
-    let cln_client = Arc::new(cln::Client::new(args.cln_grpc_address, args.network));
+    let cln_ca_cert = Certificate::from_pem(args.cln_grpc_ca_cert.resolve().await?);
+    let cln_client_cert = args.cln_grpc_client_cert.resolve().await?;
+    let cln_client_key = args.cln_grpc_client_key.resolve().await?;
+    let cln_identity = Identity::from_pem(cln_client_cert, cln_client_key);
+    let cln_conn = cln::ClientConnection {
+        address: args.cln_grpc_address,
+        ca_cert: cln_ca_cert,
+        identity: cln_identity,
+    };
+    let cln_client = Arc::new(cln::Client::new(cln_conn, args.network));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
         Arc::clone(&pgpool),

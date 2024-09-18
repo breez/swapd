@@ -7,7 +7,7 @@ use regex::Regex;
 use thiserror::Error;
 use tokio::join;
 use tonic::{
-    transport::{Channel, Uri},
+    transport::{Certificate, Channel, ClientTlsConfig, Identity, Uri},
     Request, Status,
 };
 use tracing::{debug, error, instrument, warn};
@@ -19,25 +19,39 @@ use super::cln_api::{
     ListsendpaysRequest, PayRequest, WaitsendpayRequest,
 };
 
+pub struct ClientConnection {
+    pub address: Uri,
+    pub ca_cert: Certificate,
+    pub identity: Identity,
+}
+
 #[derive(Debug)]
 pub struct Client {
     pub(super) network: Network,
     address: Uri,
+    tls_config: ClientTlsConfig
 }
 
 impl Client {
-    pub fn new(address: Uri, network: Network) -> Self {
-        Self { address, network }
+    pub fn new(connection: ClientConnection, network: Network) -> Self {
+        let tls_config = ClientTlsConfig::new()
+            .ca_certificate(connection.ca_cert)
+            .identity(connection.identity);
+        Self { address: connection.address, network, tls_config }
     }
 
     pub(super) async fn get_client(&self) -> Result<NodeClient<Channel>, GetClientError> {
-        match NodeClient::connect(self.address.clone()).await {
-            Ok(client) => Ok(client),
-            Err(e) => {
-                error!("failed to connect to cln: {:?}", e);
-                return Err(e.into());
-            }
-        }
+        let channel = match Channel::builder(self.address.clone())
+            .tls_config(self.tls_config.clone())?
+            .connect().await {
+                Ok(channel) => channel,
+                Err(e) => {
+                    error!("failed to connect to cln: {:?}", e);
+                    return Err(e.into());
+                }
+            };
+
+        Ok(NodeClient::new(channel))
     }
 }
 
