@@ -3,6 +3,7 @@ package swap_internal;
 
 service SwapManager {
     rpc AddAddressFilters (AddAddressFiltersRequest) returns (AddAddressFiltersReply) {}
+    rpc Stop (StopRequest) returns (StopReply) {}
 }
 
 message AddAddressFiltersRequest {
@@ -10,3 +11,6 @@ message AddAddressFiltersRequest {
 }
 
 message AddAddressFiltersReply {}
+
+message StopRequest {}
+message StopReply {}

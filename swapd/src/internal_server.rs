@@ -4,13 +4,14 @@ use bitcoin::{
     address::{NetworkChecked, NetworkUnchecked},
     Address, Network,
 };
+use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{instrument, warn};
 
-use crate::chain_filter::ChainFilterRepository;
+use crate::{chain_filter::ChainFilterRepository};
 
 use internal_swap_api::{
-    swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest,
+    swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest, StopReply, StopRequest,
 };
 
 pub mod internal_swap_api {
@@ -24,16 +25,18 @@ where
 {
     chain_filter_repository: Arc<R>,
     network: Network,
+    token: CancellationToken,
 }
 
 impl<R> Server<R>
 where
     R: ChainFilterRepository,
 {
-    pub fn new(network: Network, chain_filter_repository: Arc<R>) -> Self {
+    pub fn new(network: Network, chain_filter_repository: Arc<R>, token: CancellationToken) -> Self {
         Self {
             network,
             chain_filter_repository,
+            token,
         }
     }
 }
@@ -84,5 +87,11 @@ where
             .await
             .map_err(|e| Status::internal(format!("failed to insert addresses: {:?}", e)))?;
         Ok(Response::new(AddAddressFiltersReply {}))
+    }
+
+    #[instrument(skip(self), level = "debug")]
+    async fn stop(&self, _request: Request<StopRequest>) -> Result<Response<StopReply>, Status> {
+        self.token.cancel();
+        Ok(Response::new(StopReply {  }))
     }
 }

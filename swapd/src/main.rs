@@ -219,9 +219,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&fee_estimator),
     ));
 
+    let token = CancellationToken::new();
     let internal_server = SwapManagerServer::new(internal_server::Server::new(
         args.network,
         chain_filter_repository,
+        token.clone(),
     ));
     let chain_monitor = ChainMonitor::new(
         args.network,
@@ -239,7 +241,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&cln_client),
     );
 
-    let token = CancellationToken::new();
     let server_token = token.clone();
     let internal_server_token = token.clone();
     let chain_monitor_token = token.clone();
@@ -325,6 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         internal_server_token.cancel();
     });
 
+    info!("swapd started");
     tracker.wait().await;
     info!("shutdown complete");
     Ok(())
