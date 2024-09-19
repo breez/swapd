@@ -63,13 +63,18 @@ fmt-python: itest-env
 fmt-rust:
 	cargo fmt
 
-itest: build itest-env
+itest: build itest-env itest-gen-proto
 	. itest-env/bin/activate; itest-env/bin/pytest itest/tests $(PYTEST_OPTS)
 
 itest-env:
 	virtualenv itest-env --python=$(which python3) --download --always-copy --clear
 	itest-env/bin/python3 -m pip install -U pip
 	itest-env/bin/pip install ./itest
+
+itest-gen-proto: itest-env
+	. itest-env/bin/activate; \
+	python -m grpc_tools.protoc -Iswapd/proto/swap --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/swap/swap.proto; \
+	python -m grpc_tools.protoc -Iswapd/proto/swap_internal --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/swap_internal/swap_internal.proto
 
 release: release-swapd release-cli
 

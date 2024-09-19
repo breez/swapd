@@ -8,10 +8,11 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{instrument, warn};
 
-use crate::{chain_filter::ChainFilterRepository};
+use crate::chain_filter::ChainFilterRepository;
 
 use internal_swap_api::{
-    swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest, StopReply, StopRequest,
+    swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest,
+    GetInfoReply, GetInfoRequest, GetSwapReply, GetSwapRequest, StopReply, StopRequest,
 };
 
 pub mod internal_swap_api {
@@ -32,7 +33,11 @@ impl<R> Server<R>
 where
     R: ChainFilterRepository,
 {
-    pub fn new(network: Network, chain_filter_repository: Arc<R>, token: CancellationToken) -> Self {
+    pub fn new(
+        network: Network,
+        chain_filter_repository: Arc<R>,
+        token: CancellationToken,
+    ) -> Self {
         Self {
             network,
             chain_filter_repository,
@@ -90,8 +95,24 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
+    async fn get_info(
+        &self,
+        _request: Request<GetInfoRequest>,
+    ) -> Result<Response<GetInfoReply>, Status> {
+        todo!()
+    }
+
+    #[instrument(skip(self), level = "debug")]
+    async fn get_swap(
+        &self,
+        _request: Request<GetSwapRequest>,
+    ) -> Result<Response<GetSwapReply>, Status> {
+        todo!()
+    }
+
+    #[instrument(skip(self), level = "debug")]
     async fn stop(&self, _request: Request<StopRequest>) -> Result<Response<StopReply>, Status> {
         self.token.cancel();
-        Ok(Response::new(StopReply {  }))
+        Ok(Response::new(StopReply {}))
     }
 }

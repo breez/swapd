@@ -38,7 +38,7 @@ enum FileOrCert {
 
 #[derive(Debug)]
 enum ParseFileOrCertError {
-    Unknown
+    Unknown,
 }
 
 impl FromStr for FileOrCert {
@@ -46,7 +46,7 @@ impl FromStr for FileOrCert {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Ok(p) = s.parse::<PathBuf>() {
-            return Ok(Self::File(p))
+            return Ok(Self::File(p));
         }
 
         Ok(Self::Cert(String::from(s)))
@@ -62,9 +62,7 @@ impl From<std::string::String> for FileOrCert {
 impl FileOrCert {
     async fn resolve<T, TError>(&self) -> Result<String, std::io::Error> {
         Ok(match self {
-            FileOrCert::File(path_buf) => {
-                tokio::fs::read_to_string(&path_buf).await?
-            },
+            FileOrCert::File(path_buf) => tokio::fs::read_to_string(&path_buf).await?,
             FileOrCert::Cert(content) => content.to_owned(),
         })
     }
@@ -113,18 +111,18 @@ struct Args {
     #[arg(long)]
     pub cln_grpc_address: Uri,
 
-	/// Client key for grpc access. Can either be a file path or the key
-	/// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
+    /// Client key for grpc access. Can either be a file path or the key
+    /// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
     #[arg(long)]
     pub cln_grpc_ca_cert: FileOrCert,
 
     /// Client cert for grpc access. Can either be a file path or the cert
-	/// contents. Typically stored in `lightningd-dir/{network}/client.pem`.
+    /// contents. Typically stored in `lightningd-dir/{network}/client.pem`.
     #[arg(long)]
     pub cln_grpc_client_cert: FileOrCert,
 
     /// Client key for grpc access. Can either be a file path or the key
-	/// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
+    /// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
     #[arg(long)]
     pub cln_grpc_client_key: FileOrCert,
 
@@ -261,10 +259,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             address = field::display(&args.address),
             "Starting redeem monitor"
         );
-        let res = redeem_monitor.start(async {
-            redeem_monitor_token.cancelled().await;
-            info!("redeem monitor shutting down");
-        }).await;
+        let res = redeem_monitor
+            .start(async {
+                redeem_monitor_token.cancelled().await;
+                info!("redeem monitor shutting down");
+            })
+            .await;
         match res {
             Ok(_) => info!("redeem monitor exited"),
             Err(e) => info!("redeem monitor exited with {:?}", e),

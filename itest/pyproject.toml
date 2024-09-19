@@ -1,0 +1,32 @@
+[project]
+name = "swapd"
+version = "0.1.0"
+description = ""
+authors = [
+    { name = "Jesse de Wit", email = "witdejesse@hotmail.com" }
+]
+license = {text = "MIT"}
+dependencies = [
+    'binascii',
+    'black',
+    'grpcio',
+    'grpcio-tools',
+    'hashlib',
+    'python-bitcoinlib',
+    'pytest-timeout == 2.1.0',
+    'pytest-xdist == 2.5.0',
+    'pytest == 7.1.2',
+    'pytest-cov == 3.0.0',
+    'pyln-client == 24.5',
+    'pyln-testing == 24.5',
+    'pyln-proto == 24.5'
+]
+
+[build-system]
+# Minimum requirements for the build system to execute.
+requires = ["setuptools", "wheel"]  # PEP 508 specifications.
+build-backend = "setuptools.build_meta"
+
+# Ignore flat-layout.
+[tool.setuptools]
+py-modules = []

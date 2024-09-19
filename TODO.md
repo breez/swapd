@@ -1,6 +1,19 @@
 - [ ] redeem logic
+- [ ] rebroadcast in progress redeems on startup (or every iteration)
+- [ ] only broacast new redeem if fee is significantly higher than the previous
 - [ ] address the single-utxo model in add_fund_status
 - [ ] look for preimages in the background
 - [ ] persist which utxos were used for swap payment
 - [ ] add a minimum percentage profit / maximum percentage loss for claiming 
       utxos and sending the payment in get_swap_payment
+- [ ] resync the chain in the background periodically
+- [ ] add cli commands
+  - in-progress-swaps
+  - in-progress-redeems
+  - get-info
+  - list-swaps --address
+  - list-swaps --txid:outnum
+  - list-swaps --invoice
+  - list-swaps --payment-hash
+  - list-swaps --destination
+- [ ] let chainservice monitor redeem transactions
