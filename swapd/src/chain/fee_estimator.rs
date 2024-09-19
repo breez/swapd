@@ -6,7 +6,7 @@ pub struct FeeEstimate {
 #[derive(Debug)]
 pub enum FeeEstimateError {
     Unavailable,
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[async_trait::async_trait]

@@ -17,7 +17,7 @@ use super::{repository::RedeemRepository, Redeem, RedeemRepositoryError};
 
 #[derive(Debug)]
 pub enum RedeemError {
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 pub struct RedeemMonitor<CC, CR, FE, SR, P, RR, W>
 where

@@ -7,19 +7,17 @@ authors = [
 ]
 license = {text = "MIT"}
 dependencies = [
-    'binascii',
     'black',
     'grpcio',
     'grpcio-tools',
-    'hashlib',
     'python-bitcoinlib',
     'pytest-timeout == 2.1.0',
     'pytest-xdist == 2.5.0',
     'pytest == 7.1.2',
-    'pytest-cov == 3.0.0',
-    'pyln-client == 24.5',
-    'pyln-testing == 24.5',
-    'pyln-proto == 24.5'
+    'pytest-cov == 5.0.0',
+    'pyln-client == 24.8',
+    'pyln-testing == 24.8',
+    'pyln-proto == 24.8'
 ]
 
 [build-system]

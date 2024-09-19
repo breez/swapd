@@ -228,7 +228,7 @@ pub(super) enum GetClientError {
     #[error("connection failed")]
     ConnectionFailed,
     #[error("{0}")]
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 impl From<tonic::transport::Error> for GetClientError {

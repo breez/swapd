@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from pyln.testing.utils import (
     TailableProc,
     TEST_NETWORK,
@@ -8,13 +9,54 @@ from pyln.testing.utils import (
     reserve_unused_port,
     wait_for,
 )
-from pyln.testing.grpc import DUMMY_CA_PEM, DUMMY_CLIENT_PEM, DUMMY_CLIENT_KEY_PEM
+from swap_pb2_grpc import SwapperStub
+from swap_internal_pb2_grpc import SwapManagerStub
+
 import grpc
+import logging
+import os
+import threading
+
+DUMMY_CA_PEM = b"""-----BEGIN CERTIFICATE-----
+MIIBcTCCARigAwIBAgIJAJhah1bqO05cMAoGCCqGSM49BAMCMBYxFDASBgNVBAMM
+C2NsbiBSb290IENBMCAXDTc1MDEwMTAwMDAwMFoYDzQwOTYwMTAxMDAwMDAwWjAW
+MRQwEgYDVQQDDAtjbG4gUm9vdCBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA
+BPF4JrGsOsksgsYM1NNdUdLESwOxkzyD75Rnj/g7sFEVYXewcmyB3MRGCBx2a3/7
+ft2Xu2ED6WigajaHlnSvfUyjTTBLMBkGA1UdEQQSMBCCA2NsboIJbG9jYWxob3N0
+MB0GA1UdDgQWBBRcTjvqVodamGirO6sX1rOR02LwXzAPBgNVHRMBAf8EBTADAQH/
+MAoGCCqGSM49BAMCA0cAMEQCICDvV5iFw/nmJdl6rlEEGAdBdZqjxD0tV6U/FvuL
+7PycAiASEMtsFtpfiUvxveBkOGt7AN32GP/Z75l+GhYXh7L1ig==
+-----END CERTIFICATE-----"""
+
+
+DUMMY_CA_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgqbU7LQsRcvmI5vE5
+MBBNK3imhIU2jmAczgvLuBi/Ys+hRANCAATxeCaxrDrJLILGDNTTXVHSxEsDsZM8
+g++UZ4/4O7BRFWF3sHJsgdzERggcdmt/+37dl7thA+looGo2h5Z0r31M
+-----END PRIVATE KEY-----"""
+
+
+DUMMY_CLIENT_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgIEdQyKso8PaD1kiz
+xxFEcKiTvTg+bej4Nc/GqnXipcGhRANCAARGoUNSnWx1qgt4RiVG8tOMX1vpKvhr
+OLcUJ92T++kIFZchZvcTXwnlNiTAQg3ukL+RYyG5Q1PaYrYRVlOtl1T0
+-----END PRIVATE KEY-----"""
+
+
+DUMMY_CLIENT_PEM = b"""-----BEGIN CERTIFICATE-----
+MIIBRDCB7KADAgECAgkA8SsXq7IZfi8wCgYIKoZIzj0EAwIwFjEUMBIGA1UEAwwL
+Y2xuIFJvb3QgQ0EwIBcNNzUwMTAxMDAwMDAwWhgPNDA5NjAxMDEwMDAwMDBaMBox
+GDAWBgNVBAMMD2NsbiBncnBjIFNlcnZlcjBZMBMGByqGSM49AgEGCCqGSM49AwEH
+A0IABEahQ1KdbHWqC3hGJUby04xfW+kq+Gs4txQn3ZP76QgVlyFm9xNfCeU2JMBC
+De6Qv5FjIblDU9pithFWU62XVPSjHTAbMBkGA1UdEQQSMBCCA2NsboIJbG9jYWxo
+b3N0MAoGCCqGSM49BAMCA0cAMEQCICTU/YAs35cb6DRdZNzO1YbEt77uEjcqMRca
+Hh6kK99RAiAKOQOkGnoAICjBmBJeC/iC4/+hhhkWZtFgbC3Jg5JD0w==
+-----END CERTIFICATE-----"""
 
 SWAPD_CONFIG = OrderedDict(
     {
         "log-level": "trace",
-        "chain_poll_interval_seconds": "1",
+        "chain-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
         "lock-time": "288",
         "min-confirmations": "1",
@@ -29,6 +71,7 @@ class SwapD(TailableProc):
         self,
         lightning_node,
         process_dir,
+        bitcoindproxy,
         grpc_port=27103,
         internal_grpc_port=27104,
         swapd_id=0,
@@ -41,6 +84,7 @@ class SwapD(TailableProc):
         self.bitcoindproxy = bitcoindproxy
         self.lightning_node = lightning_node
         self.prefix = "swapd-%d" % (swapd_id)
+        self.process_dir = process_dir
         self.opts = SWAPD_CONFIG.copy()
         opts = {
             "address": "127.0.0.1:{}".format(grpc_port),
@@ -48,11 +92,15 @@ class SwapD(TailableProc):
             "network": TEST_NETWORK,
             "bitcoind-rpc-user": BITCOIND_CONFIG["rpcuser"],
             "bitcoind-rpc-password": BITCOIND_CONFIG["rpcpassword"],
+            "cln-grpc-address": "https://localhost:{}".format(lightning_node.grpc_port),
             "cln-grpc-ca-cert": DUMMY_CA_PEM,
             "cln-grpc-client-cert": DUMMY_CLIENT_PEM,
             "cln-grpc-client-key": DUMMY_CLIENT_KEY_PEM,
             "db-url": "",  # TODO: Add postgres
         }
+
+        for k, v in opts.items():
+            self.opts[k] = v
 
     @property
     def cmd_line(self):
@@ -67,11 +115,13 @@ class SwapD(TailableProc):
             else:
                 opts.append("--{}={}".format(k, v))
 
-        return self.cmd_prefix + [self.executable] + self.early_opts + opts
+        return [self.executable] + opts
 
     def start(self, stdin=None, wait_for_initialized=True, stderr_redir=False):
-        self.opts["bitcoind-rpc-address"] = "127.0.0.1:{}".format(self.rpcproxy.rpcport)
-        TailableProc.start(self, stdin, stdout_redir=False, stderr_redir=stderr_redir)
+        self.opts["bitcoind-rpc-address"] = "http://127.0.0.1:{}".format(
+            self.bitcoindproxy.rpcport
+        )
+        TailableProc.start(self, stdin, stdout_redir=True, stderr_redir=stderr_redir)
         if wait_for_initialized:
             self.wait_for_log("swapd started")
         logging.info("SwapD started")
@@ -93,6 +143,7 @@ class SwapdServer(object):
         process_dir,
         bitcoind,
         lightning_node,
+        may_fail=False,
         grpc_port=None,
         internal_grpc_port=None,
         options=None,
@@ -100,6 +151,7 @@ class SwapdServer(object):
     ):
         self.bitcoin = bitcoind
         self.lightning_node = lightning_node
+        self.may_fail = may_fail
 
         self._create_grpc_rpc()
         self._create_internal_grpc_rpc()
@@ -146,7 +198,7 @@ class SwapdServer(object):
         channel = grpc.insecure_channel(
             address,
         )
-        return swap_pb2_grpc.SwapperStub(channel)
+        return SwapperStub(channel)
 
     @property
     def internal_grpc(self):
@@ -158,7 +210,7 @@ class SwapdServer(object):
         channel = grpc.insecure_channel(
             address,
         )
-        return swap_internal_pb2_grpc.SwapManagerStub(channel)
+        return SwapManagerStub(channel)
 
     def start(self, stderr_redir=False, wait_for_bitcoind_sync=True):
         self.daemon.start(stderr_redir=stderr_redir)
@@ -213,7 +265,7 @@ class SwapperGrpc(object):
         self.logger = logging.getLogger("SwapGrpc")
         self.logger.debug(f"Connecting to grpc interface at {host}:{port}")
         self.channel = grpc.insecure_channel(f"{host}:{port}")
-        self.stub = swap_pb2_grpc.SwapperStub(self.channel)
+        self.stub = SwapperStub(self.channel)
 
     def add_fund_init(self, lightning_node, pubkey, hash):
         node_id = lightning_node.info["id"]
@@ -234,7 +286,7 @@ class SwapManagerGrpc(object):
         self.logger = logging.getLogger("SwapManagerGrpc")
         self.logger.debug(f"Connecting to internal grpc interface at {host}:{port}")
         self.channel = grpc.insecure_channel(f"{host}:{port}")
-        self.stub = swap_internal_pb2_grpc.SwapManagerStub(self.channel)
+        self.stub = SwapManagerStub(self.channel)
 
     def get_info(self):
         payload = swap_internal_pb2.GetInfoRequest()
@@ -284,8 +336,8 @@ class SwapdFactory(object):
         cleandir=True,
         **kwargs,
     ):
-        grpc_port = self.reserve_unused_port()
-        internal_grpc_port = self.reserve_unused_port()
+        grpc_port = self.get_unused_port()
+        internal_grpc_port = self.get_unused_port()
         swapd_id = self.get_swapd_id()
         process_dir = os.path.join(self.directory, "swapd-{}/".format(swapd_id))
 
@@ -295,6 +347,7 @@ class SwapdFactory(object):
             process_dir,
             self.bitcoind,
             node,
+            may_fail,
             grpc_port,
             internal_grpc_port,
             options,

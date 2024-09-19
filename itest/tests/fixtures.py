@@ -1,4 +1,14 @@
+from pyln.testing.fixtures import (
+    directory,
+    test_name,
+    bitcoind,
+    executor,
+    node_factory,
+    teardown_checks,
+)
+from swapd import *
 import pytest
+import re
 
 
 def get_crash_log(swapd):
@@ -47,25 +57,21 @@ def print_err_log(swapd):
 
 @pytest.fixture
 def swapd_factory(
-    request,
     directory,
     test_name,
     bitcoind,
     executor,
     db_provider,
     teardown_checks,
-    node_cls,
-    jsonschemas,
+    node_factory,
 ):
-    nf = SwapdFactory(
-        request,
+    sf = SwapdFactory(
         test_name,
         bitcoind,
         executor,
         directory=directory,
         db_provider=db_provider,
-        node_cls=node_cls,
-        jsonschemas=jsonschemas,
+        node_factory=node_factory,
     )
 
     yield sf

@@ -64,7 +64,7 @@ fmt-rust:
 	cargo fmt
 
 itest: build itest-env itest-gen-proto
-	. itest-env/bin/activate; itest-env/bin/pytest itest/tests $(PYTEST_OPTS)
+	. itest-env/bin/activate; PATH="target/debug:$(PATH)" itest-env/bin/pytest itest/tests $(PYTEST_OPTS)
 
 itest-env:
 	virtualenv itest-env --python=$(which python3) --download --always-copy --clear

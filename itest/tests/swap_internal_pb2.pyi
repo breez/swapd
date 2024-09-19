@@ -20,19 +20,32 @@ class GetInfoRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class GetInfoReply(_message.Message):
-    __slots__ = ("block_height", "network", "synced")
+    __slots__ = ("block_height", "network")
     BLOCK_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     NETWORK_FIELD_NUMBER: _ClassVar[int]
-    SYNCED_FIELD_NUMBER: _ClassVar[int]
     block_height: int
     network: str
-    synced: bool
-    def __init__(
-        self,
-        block_height: _Optional[int] = ...,
-        network: _Optional[str] = ...,
-        synced: bool = ...,
-    ) -> None: ...
+    def __init__(self, block_height: _Optional[int] = ..., network: _Optional[str] = ...) -> None: ...
+
+class GetSwapRequest(_message.Message):
+    __slots__ = ("address", "payment_request", "payment_hash", "destination")
+    ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    PAYMENT_REQUEST_FIELD_NUMBER: _ClassVar[int]
+    PAYMENT_HASH_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_FIELD_NUMBER: _ClassVar[int]
+    address: str
+    payment_request: str
+    payment_hash: bytes
+    destination: str
+    def __init__(self, address: _Optional[str] = ..., payment_request: _Optional[str] = ..., payment_hash: _Optional[bytes] = ..., destination: _Optional[str] = ...) -> None: ...
+
+class GetSwapReply(_message.Message):
+    __slots__ = ("address", "confirmation_height")
+    ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    address: str
+    confirmation_height: int
+    def __init__(self, address: _Optional[str] = ..., confirmation_height: _Optional[int] = ...) -> None: ...
 
 class StopRequest(_message.Message):
     __slots__ = ()

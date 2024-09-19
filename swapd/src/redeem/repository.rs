@@ -12,7 +12,7 @@ pub struct Redeem {
 
 #[derive(Debug)]
 pub enum RedeemRepositoryError {
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[async_trait::async_trait]

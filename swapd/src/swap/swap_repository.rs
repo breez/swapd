@@ -11,30 +11,30 @@ use super::{swap_service::Swap, SwapState};
 #[derive(Debug)]
 pub enum SwapPersistenceError {
     AlreadyExists,
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[derive(Debug)]
 pub enum AddPreimageError {
     DoesNotExist,
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[derive(Debug)]
 pub enum AddPaymentResultError {
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[derive(Debug)]
 pub enum GetPaidUtxosError {
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[derive(Debug)]
 pub enum GetSwapError {
     NotFound,
     InvalidPreimage,
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[derive(Debug, Error)]
@@ -42,7 +42,7 @@ pub enum GetSwapsError {
     #[error("invalid preimage")]
     InvalidPreimage,
     #[error("{0}")]
-    General(Box<dyn std::error::Error>),
+    General(Box<dyn std::error::Error + Sync + Send>),
 }
 
 #[derive(Debug)]
