@@ -11,6 +11,7 @@ from pyln.testing.utils import (
 )
 from swap_pb2_grpc import SwapperStub
 from swap_internal_pb2_grpc import SwapManagerStub
+from pathlib import Path
 import swap_internal_pb2
 import swap_pb2
 
@@ -18,42 +19,6 @@ import grpc
 import logging
 import os
 import threading
-
-DUMMY_CA_PEM = b"""-----BEGIN CERTIFICATE-----
-MIIBcTCCARigAwIBAgIJAJhah1bqO05cMAoGCCqGSM49BAMCMBYxFDASBgNVBAMM
-C2NsbiBSb290IENBMCAXDTc1MDEwMTAwMDAwMFoYDzQwOTYwMTAxMDAwMDAwWjAW
-MRQwEgYDVQQDDAtjbG4gUm9vdCBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA
-BPF4JrGsOsksgsYM1NNdUdLESwOxkzyD75Rnj/g7sFEVYXewcmyB3MRGCBx2a3/7
-ft2Xu2ED6WigajaHlnSvfUyjTTBLMBkGA1UdEQQSMBCCA2NsboIJbG9jYWxob3N0
-MB0GA1UdDgQWBBRcTjvqVodamGirO6sX1rOR02LwXzAPBgNVHRMBAf8EBTADAQH/
-MAoGCCqGSM49BAMCA0cAMEQCICDvV5iFw/nmJdl6rlEEGAdBdZqjxD0tV6U/FvuL
-7PycAiASEMtsFtpfiUvxveBkOGt7AN32GP/Z75l+GhYXh7L1ig==
------END CERTIFICATE-----"""
-
-
-DUMMY_CA_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgqbU7LQsRcvmI5vE5
-MBBNK3imhIU2jmAczgvLuBi/Ys+hRANCAATxeCaxrDrJLILGDNTTXVHSxEsDsZM8
-g++UZ4/4O7BRFWF3sHJsgdzERggcdmt/+37dl7thA+looGo2h5Z0r31M
------END PRIVATE KEY-----"""
-
-
-DUMMY_CLIENT_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgIEdQyKso8PaD1kiz
-xxFEcKiTvTg+bej4Nc/GqnXipcGhRANCAARGoUNSnWx1qgt4RiVG8tOMX1vpKvhr
-OLcUJ92T++kIFZchZvcTXwnlNiTAQg3ukL+RYyG5Q1PaYrYRVlOtl1T0
------END PRIVATE KEY-----"""
-
-
-DUMMY_CLIENT_PEM = b"""-----BEGIN CERTIFICATE-----
-MIIBRDCB7KADAgECAgkA8SsXq7IZfi8wCgYIKoZIzj0EAwIwFjEUMBIGA1UEAwwL
-Y2xuIFJvb3QgQ0EwIBcNNzUwMTAxMDAwMDAwWhgPNDA5NjAxMDEwMDAwMDBaMBox
-GDAWBgNVBAMMD2NsbiBncnBjIFNlcnZlcjBZMBMGByqGSM49AgEGCCqGSM49AwEH
-A0IABEahQ1KdbHWqC3hGJUby04xfW+kq+Gs4txQn3ZP76QgVlyFm9xNfCeU2JMBC
-De6Qv5FjIblDU9pithFWU62XVPSjHTAbMBkGA1UdEQQSMBCCA2NsboIJbG9jYWxo
-b3N0MAoGCCqGSM49BAMCA0cAMEQCICTU/YAs35cb6DRdZNzO1YbEt77uEjcqMRca
-Hh6kK99RAiAKOQOkGnoAICjBmBJeC/iC4/+hhhkWZtFgbC3Jg5JD0w==
------END CERTIFICATE-----"""
 
 SWAPD_CONFIG = OrderedDict(
     {
@@ -73,6 +38,7 @@ class SwapD(TailableProc):
     def __init__(
         self,
         lightning_node,
+        node_grpc_port,
         process_dir,
         bitcoindproxy,
         db_url,
@@ -90,16 +56,22 @@ class SwapD(TailableProc):
         self.prefix = "swapd-%d" % (swapd_id)
         self.process_dir = process_dir
         self.opts = SWAPD_CONFIG.copy()
+
+        p = Path(lightning_node.daemon.lightning_dir) / TEST_NETWORK
+        cert_path = p / "client.pem"
+        key_path = p / "client-key.pem"
+        ca_cert_path = p / "ca.pem"
+
         opts = {
             "address": "127.0.0.1:{}".format(grpc_port),
             "internal-address": "127.0.0.1:{}".format(internal_grpc_port),
             "network": TEST_NETWORK,
             "bitcoind-rpc-user": BITCOIND_CONFIG["rpcuser"],
             "bitcoind-rpc-password": BITCOIND_CONFIG["rpcpassword"],
-            "cln-grpc-address": "https://localhost:{}".format(lightning_node.grpc_port),
-            "cln-grpc-ca-cert": DUMMY_CA_PEM,
-            "cln-grpc-client-cert": DUMMY_CLIENT_PEM,
-            "cln-grpc-client-key": DUMMY_CLIENT_KEY_PEM,
+            "cln-grpc-address": "https://localhost:{}".format(node_grpc_port),
+            "cln-grpc-ca-cert": ca_cert_path.absolute().as_posix(),
+            "cln-grpc-client-cert": cert_path.absolute().as_posix(),
+            "cln-grpc-client-key": key_path.absolute().as_posix(),
             "db-url": db_url,
             "auto-migrate": None,
         }
@@ -148,6 +120,7 @@ class SwapdServer(object):
         process_dir,
         bitcoind,
         lightning_node,
+        node_grpc_port,
         db_url,
         may_fail=False,
         grpc_port=None,
@@ -165,6 +138,7 @@ class SwapdServer(object):
 
         self.daemon = SwapD(
             lightning_node,
+            node_grpc_port,
             process_dir,
             bitcoind.get_proxy(),
             db_url,
@@ -372,16 +346,18 @@ class SwapdFactory(object):
     ):
         grpc_port = self.get_unused_port()
         internal_grpc_port = self.get_unused_port()
+        cln_grpc_port = self.get_unused_port()
         swapd_id = self.get_swapd_id()
         process_dir = os.path.join(self.directory, "swapd-{}/".format(swapd_id))
 
         postgres = self.postgres_factory.get_container()
-        node = self.node_factory.get_node()
+        node = self.node_factory.get_node(options={"grpc-port": cln_grpc_port})
         swapd = SwapdServer(
             swapd_id,
             process_dir,
             self.bitcoind,
             node,
+            cln_grpc_port,
             postgres.connectionstring,
             may_fail,
             grpc_port,

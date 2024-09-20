@@ -63,7 +63,7 @@ fmt-python: itest-env
 fmt-rust:
 	cargo fmt
 
-itest: build itest-env itest-gen-proto
+itest: build itest-env
 	. itest-env/bin/activate; PATH="target/debug:$(PATH)" itest-env/bin/pytest itest/tests $(PYTEST_OPTS)
 
 itest-env:
