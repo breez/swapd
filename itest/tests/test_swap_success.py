@@ -13,7 +13,7 @@ from pyln.testing.fixtures import (
     test_name,
 )
 from pyln.testing.utils import wait_for
-from fixtures import swapd_factory
+from fixtures import swapd_factory, postgres_factory
 import hashlib
 import os
 

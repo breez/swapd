@@ -11,6 +11,7 @@ from pyln.testing.utils import (
 )
 from swap_pb2_grpc import SwapperStub
 from swap_internal_pb2_grpc import SwapManagerStub
+import swap_internal_pb2
 
 import grpc
 import logging
@@ -72,6 +73,7 @@ class SwapD(TailableProc):
         lightning_node,
         process_dir,
         bitcoindproxy,
+        db_url,
         grpc_port=27103,
         internal_grpc_port=27104,
         swapd_id=0,
@@ -96,7 +98,7 @@ class SwapD(TailableProc):
             "cln-grpc-ca-cert": DUMMY_CA_PEM,
             "cln-grpc-client-cert": DUMMY_CLIENT_PEM,
             "cln-grpc-client-key": DUMMY_CLIENT_KEY_PEM,
-            "db-url": "",  # TODO: Add postgres
+            "db-url": db_url,
         }
 
         for k, v in opts.items():
@@ -143,13 +145,14 @@ class SwapdServer(object):
         process_dir,
         bitcoind,
         lightning_node,
+        db_url,
         may_fail=False,
         grpc_port=None,
         internal_grpc_port=None,
         options=None,
         **kwargs,
     ):
-        self.bitcoin = bitcoind
+        self.bitcoind = bitcoind
         self.lightning_node = lightning_node
         self.may_fail = may_fail
 
@@ -159,7 +162,8 @@ class SwapdServer(object):
         self.daemon = SwapD(
             lightning_node,
             process_dir,
-            bitcoindproxy=bitcoind.get_proxy(),
+            bitcoind.get_proxy(),
+            db_url,
             grpc_port=grpc_port,
             internal_grpc_port=internal_grpc_port,
             swapd_id=swapd_id,
@@ -215,8 +219,14 @@ class SwapdServer(object):
     def start(self, stderr_redir=False, wait_for_bitcoind_sync=True):
         self.daemon.start(stderr_redir=stderr_redir)
         if wait_for_bitcoind_sync:
-            height = self.bitcoind.rpc.getblockchaininfo()["blocks"]
-            wait_for(lambda: self.internal_grpc.get_info()["block_height"] == height)
+            wait_for(lambda: self.is_synced())
+
+    def is_synced(self):
+        height = self.bitcoind.rpc.getblockchaininfo()["blocks"]
+        try:
+            return self.internal_rpc.get_info()["block_height"] == height
+        except:
+            return False
 
     def stop(self, timeout=10):
         """Attempt to do a clean shutdown, but kill if it hangs"""
@@ -304,7 +314,7 @@ class SwapdFactory(object):
     """A factory to setup and start `swapd` daemons."""
 
     def __init__(
-        self, testname, bitcoind, executor, directory, db_provider, node_factory
+        self, testname, bitcoind, executor, directory, node_factory, postgres_factory,
     ):
 
         self.testname = testname
@@ -315,8 +325,8 @@ class SwapdFactory(object):
         self.bitcoind = bitcoind
         self.directory = directory
         self.lock = threading.Lock()
-        self.db_provider = db_provider
         self.node_factory = node_factory
+        self.postgres_factory = postgres_factory
 
     def get_swapd_id(self):
         """Generate a unique numeric ID for a swapd instance"""
@@ -328,7 +338,6 @@ class SwapdFactory(object):
     def get_swapd(
         self,
         options=None,
-        dbfile=None,
         start=True,
         wait_for_bitcoind_sync=True,
         may_fail=False,
@@ -341,12 +350,14 @@ class SwapdFactory(object):
         swapd_id = self.get_swapd_id()
         process_dir = os.path.join(self.directory, "swapd-{}/".format(swapd_id))
 
+        postgres = self.postgres_factory.get_container()
         node = self.node_factory.get_node()
         swapd = SwapdServer(
             swapd_id,
             process_dir,
             self.bitcoind,
             node,
+            postgres.connectionstring,
             may_fail,
             grpc_port,
             internal_grpc_port,

@@ -8,8 +8,10 @@ authors = [
 license = {text = "MIT"}
 dependencies = [
     'black',
+    'docker',
     'grpcio',
     'grpcio-tools',
+    'psycopg2-binary',
     'python-bitcoinlib',
     'pytest-timeout == 2.1.0',
     'pytest-xdist == 2.5.0',

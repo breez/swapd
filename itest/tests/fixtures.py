@@ -7,9 +7,11 @@ from pyln.testing.fixtures import (
     teardown_checks,
 )
 from swapd import *
+from postgres import PostgresContainerFactory
 import pytest
 import re
-
+import time
+import docker
 
 def get_crash_log(swapd):
     if swapd.may_fail:
@@ -56,22 +58,31 @@ def print_err_log(swapd):
 
 
 @pytest.fixture
+def postgres_factory(test_name):
+    pf = PostgresContainerFactory(test_name)
+    yield pf
+    errs = pf.killall()
+    for e in errs:
+        teardown_checks.add_error(e)
+
+
+@pytest.fixture
 def swapd_factory(
     directory,
     test_name,
     bitcoind,
     executor,
-    db_provider,
     teardown_checks,
     node_factory,
+    postgres_factory,
 ):
     sf = SwapdFactory(
         test_name,
         bitcoind,
         executor,
         directory=directory,
-        db_provider=db_provider,
         node_factory=node_factory,
+        postgres_factory=postgres_factory,
     )
 
     yield sf
