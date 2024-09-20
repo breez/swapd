@@ -76,7 +76,7 @@ CREATE INDEX tx_outputs_address_idx ON tx_outputs(address);
 CREATE TABLE tx_blocks (
     tx_id VARCHAR NOT NULL,
     block_hash VARCHAR NOT NULL,
-    FOREIGN KEY (block_hash) REFERENCES blocks (block_hash) ON DELETE CASCADE,
+    FOREIGN KEY (block_hash) REFERENCES blocks (block_hash) ON DELETE CASCADE
 );
 
 CREATE INDEX tx_blocks_tx_id_output_index_idx ON tx_blocks(tx_id);
@@ -88,8 +88,8 @@ CREATE TABLE tx_inputs (
     output_index BIGINT NOT NULL,
     spending_tx_id VARCHAR NOT NULL,
     spending_input_index BIGINT NOT NULL,
-    PRIMARY KEY (spending_tx_id, spending_input_index)
-    FOREIGN KEY (tx_id, output_index) REFERENCES tx_outputs (tx_id, output_index) ON DELETE CASCADE,
+    PRIMARY KEY (spending_tx_id, spending_input_index),
+    FOREIGN KEY (tx_id, output_index) REFERENCES tx_outputs (tx_id, output_index) ON DELETE CASCADE
 );
 
 CREATE INDEX tx_inputs_tx_id_output_index_idx ON tx_inputs(tx_id, output_index);

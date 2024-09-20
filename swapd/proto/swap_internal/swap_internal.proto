@@ -24,10 +24,13 @@ message GetSwapRequest {
     optional string address = 1;
     optional string payment_request = 2;
     optional bytes payment_hash = 3;
-    optional string destination = 4;
 }
 message GetSwapReply {
     string address = 1;
+    repeated SwapOutput outputs = 2;
+}
+message SwapOutput {
+    string outpoint = 1;
     optional uint64 confirmation_height = 2;
 }
 

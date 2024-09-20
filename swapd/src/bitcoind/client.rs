@@ -7,9 +7,9 @@ use bitcoin::{
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
+use serde_json::{Number, Value};
 use tokio::sync::Mutex;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::chain::{BlockHeader, ChainClient, ChainError};
 
@@ -61,6 +61,8 @@ impl BitcoindClient {
         TParams: Serialize,
         TResponse: DeserializeOwned,
     {
+        let method = method.into();
+        trace!("calling {}", method);
         let client = reqwest::Client::new();
         let resp = client
             .request(Method::POST, &self.address)
@@ -68,7 +70,7 @@ impl BitcoindClient {
             .json(&RpcRequest {
                 jsonrpc: String::from("1.0"),
                 id: self.get_req_id().await.to_string(),
-                method: method.into(),
+                method,
                 params,
             })
             .send()
@@ -78,7 +80,10 @@ impl BitcoindClient {
             RpcServerMessageBody::Notification { method: _, params } => {
                 Ok(serde_json::from_value(params)?)
             }
-            RpcServerMessageBody::Response { id: _, result } => Ok(serde_json::from_value(result)?),
+            RpcServerMessageBody::Response { id: _, result } => {
+                trace!("{}", result);
+                Ok(serde_json::from_value(result)?)
+            }
             RpcServerMessageBody::Error { id: _, error } => Err(CallError::RpcError(error)),
         }
     }
@@ -104,7 +109,10 @@ impl BitcoindClient {
     async fn getblock(&self, block_hash: String) -> Result<GetBlockResponse, CallError> {
         Ok(
             match self
-                .call("getblock", Value::Array(vec![Value::String(block_hash)]))
+                .call(
+                    "getblock",
+                    Value::Array(vec![Value::String(block_hash), Value::Number(0.into())]),
+                )
                 .await
             {
                 Ok(v) => v,
@@ -207,7 +215,7 @@ impl ChainClient for BitcoindClient {
     async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError> {
         let mut addresses = Vec::new();
         for utxo in utxos {
-            let tx = self.getrawtransaction(utxo.to_string()).await?;
+            let tx = self.getrawtransaction(utxo.txid.to_string()).await?;
             let tx = hex::decode(tx.str)
                 .map_err(|e| ChainError::General(format!("invalid tx hex: {:?}", e).into()))?;
             let tx = Transaction::consensus_decode(&mut &tx[..])?;

@@ -130,19 +130,23 @@ struct Args {
     /// Polling interval between chain syncs.
     #[arg(long, default_value = "20")]
     pub chain_poll_interval_seconds: u64,
+
+    /// Polling interval between redeem runs.
+    #[arg(long, default_value = "20")]
+    pub redeem_poll_interval_seconds: u64,
+
+    /// Automatically apply migrations to the database.
+    #[arg(long)]
+    pub auto_migrate: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("main called");
     let args = Args::parse();
-    println!("args parsed");
     tracing_subscriber::registry()
         .with(EnvFilter::new(&args.log_level))
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .init();
-    println!("env filter setup");
-    debug!("{:?}", args);
     let privkey_provider = RandomPrivateKeyProvider::new(args.network);
     let swap_service = Arc::new(SwapService::new(
         args.network,
@@ -168,6 +172,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let cln_client = Arc::new(cln::Client::new(cln_conn, args.network));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
+    if args.auto_migrate {
+        postgresql::migrate(&*pgpool).await?;
+    }
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
         Arc::clone(&pgpool),
         args.network,
@@ -205,6 +212,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let internal_server = SwapManagerServer::new(internal_server::Server::new(
         args.network,
         chain_filter_repository,
+        Arc::clone(&chain_repository),
+        Arc::clone(&swap_repository),
         token.clone(),
     ));
     let chain_monitor = ChainMonitor::new(
@@ -217,6 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&chain_client),
         Arc::clone(&chain_repository),
         Arc::clone(&fee_estimator),
+        Duration::from_secs(args.redeem_poll_interval_seconds),
         Arc::clone(&swap_repository),
         Arc::clone(&swap_service),
         Arc::clone(&redeem_repository),
@@ -239,10 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         token.cancel();
     });
     tracker.spawn(async move {
-        info!(
-            address = field::display(&args.address),
-            "Starting redeem monitor"
-        );
+        info!("Starting redeem monitor");
         let res = redeem_monitor
             .start(async {
                 redeem_monitor_token.cancelled().await;
@@ -256,10 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         redeem_monitor_token.cancel();
     });
     tracker.spawn(async move {
-        info!(
-            address = field::display(&args.address),
-            "Starting chain monitor"
-        );
+        info!("Starting chain monitor");
         let res = chain_monitor
             .start(async {
                 chain_monitor_token.cancelled().await;

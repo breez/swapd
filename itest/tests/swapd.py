@@ -12,6 +12,7 @@ from pyln.testing.utils import (
 from swap_pb2_grpc import SwapperStub
 from swap_internal_pb2_grpc import SwapManagerStub
 import swap_internal_pb2
+import swap_pb2
 
 import grpc
 import logging
@@ -56,8 +57,9 @@ Hh6kK99RAiAKOQOkGnoAICjBmBJeC/iC4/+hhhkWZtFgbC3Jg5JD0w==
 
 SWAPD_CONFIG = OrderedDict(
     {
-        "log-level": "trace",
+        "log-level": "swapd=debug,info",
         "chain-poll-interval-seconds": "1",
+        "redeem-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
         "lock-time": "288",
         "min-confirmations": "1",
@@ -79,7 +81,7 @@ class SwapD(TailableProc):
         swapd_id=0,
     ):
         # We handle our own version of verbose, below.
-        TailableProc.__init__(self, process_dir, verbose=False)
+        TailableProc.__init__(self, process_dir, verbose=True)
         self.executable = "swapd"
         self.grpc_port = grpc_port
         self.internal_grpc_port = internal_grpc_port
@@ -99,6 +101,7 @@ class SwapD(TailableProc):
             "cln-grpc-client-cert": DUMMY_CLIENT_PEM,
             "cln-grpc-client-key": DUMMY_CLIENT_KEY_PEM,
             "db-url": db_url,
+            "auto-migrate": None,
         }
 
         for k, v in opts.items():
@@ -155,9 +158,10 @@ class SwapdServer(object):
         self.bitcoind = bitcoind
         self.lightning_node = lightning_node
         self.may_fail = may_fail
-
-        self._create_grpc_rpc()
-        self._create_internal_grpc_rpc()
+        self.rc = 0
+        self._create_grpc_rpc(grpc_port)
+        self._create_internal_grpc_rpc(internal_grpc_port)
+        self.logger = logging.getLogger("SwapdServer")
 
         self.daemon = SwapD(
             lightning_node,
@@ -172,24 +176,30 @@ class SwapdServer(object):
         if options is not None:
             self.daemon.opts.update(options)
 
-    def _create_grpc_rpc(self):
-        self.grpc_port = reserve_unused_port()
+    def _create_grpc_rpc(self, port):
+        if port is None:
+            self.grpc_port = reserve_unused_port()
+        else:
+            self.grpc_port = port
 
         # Now the node will actually start up and use them, so we can
         # create the RPC instance.
         self.rpc = SwapperGrpc(
-            host="localhost",
+            host="127.0.0.1",
             port=self.grpc_port,
         )
 
-    def _create_internal_grpc_rpc(self):
-        self.grpc_port = reserve_unused_port()
+    def _create_internal_grpc_rpc(self, port):
+        if port is None:
+            self.internal_grpc_port = reserve_unused_port()
+        else:
+            self.internal_grpc_port = port
 
         # Now the node will actually start up and use them, so we can
         # create the RPC instance.
         self.internal_rpc = SwapManagerGrpc(
-            host="localhost",
-            port=self.grpc_port,
+            host="127.0.0.1",
+            port=self.internal_grpc_port,
         )
 
     @property
@@ -219,13 +229,18 @@ class SwapdServer(object):
     def start(self, stderr_redir=False, wait_for_bitcoind_sync=True):
         self.daemon.start(stderr_redir=stderr_redir)
         if wait_for_bitcoind_sync:
-            wait_for(lambda: self.is_synced())
+            wait_for(self.is_synced)
 
     def is_synced(self):
         height = self.bitcoind.rpc.getblockchaininfo()["blocks"]
         try:
-            return self.internal_rpc.get_info()["block_height"] == height
-        except:
+            block_height = self.internal_rpc.get_info().block_height
+            self.logger.debug(
+                f"chain height is {height}, swapd height is {block_height}"
+            )
+            return block_height == height
+        except Exception as e:
+            self.logger.debug(f"still waiting for sync: {e}")
             return False
 
     def stop(self, timeout=10):
@@ -279,11 +294,11 @@ class SwapperGrpc(object):
 
     def add_fund_init(self, lightning_node, pubkey, hash):
         node_id = lightning_node.info["id"]
-        payload = swap_pb2.GetInfoRequest()
+        payload = swap_pb2.AddFundInitRequest(nodeID=node_id, pubkey=pubkey, hash=hash)
         return self.stub.AddFundInit(payload)
 
     def get_swap_payment(self, payment_request):
-        payload = swap_pb2.GetSwapPaymentRequest(payment_request=payment_request)
+        payload = swap_pb2.GetSwapPaymentRequest(paymentRequest=payment_request)
         return self.stub.GetSwapPayment(payload)
 
 
@@ -302,6 +317,10 @@ class SwapManagerGrpc(object):
         payload = swap_internal_pb2.GetInfoRequest()
         return self.stub.GetInfo(payload)
 
+    def get_swap(self, address=None):
+        payload = swap_internal_pb2.GetSwapRequest(address=address)
+        return self.stub.GetSwap(payload)
+
     def stop(self):
         payload = swap_internal_pb2.StopRequest()
         try:
@@ -314,7 +333,13 @@ class SwapdFactory(object):
     """A factory to setup and start `swapd` daemons."""
 
     def __init__(
-        self, testname, bitcoind, executor, directory, node_factory, postgres_factory,
+        self,
+        testname,
+        bitcoind,
+        executor,
+        directory,
+        node_factory,
+        postgres_factory,
     ):
 
         self.testname = testname

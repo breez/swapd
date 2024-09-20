@@ -43,7 +43,7 @@ impl ChainRepository {
                ,   output_index
                ,   address
                ,   amount)
-               SELECT t.address, t.tx_id, t.output_index, t.amount
+               SELECT t.tx_id, t.output_index, t.address, t.amount
                FROM UNNEST(
                    $1::text[]
                ,   $2::bigint[]
@@ -155,8 +155,7 @@ impl chain::ChainRepository for ChainRepository {
                ,   $2::text[]
                ) AS i (
                    tx_id
-               ,   block_hash
-               ,   spending_tx_id)
+               ,   block_hash)
                WHERE EXISTS (SELECT 1
                              FROM tx_outputs o
                              WHERE o.tx_id = i.tx_id)
@@ -166,7 +165,7 @@ impl chain::ChainRepository for ChainRepository {
         )
         .bind(&txns)
         .bind(&block_hashes)
-        .execute(&*self.pool)
+        .execute(&mut *tx)
         .await?;
 
         tx.commit().await?;
@@ -254,6 +253,36 @@ impl chain::ChainRepository for ChainRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
+    async fn get_tip(&self) -> Result<Option<BlockHeader>, ChainRepositoryError> {
+        let mut rows = sqlx::query(
+            r#"SELECT block_hash
+               ,      prev_block_hash
+               ,      height
+               FROM blocks
+               WHERE height = (SELECT MAX(height) FROM blocks)"#,
+        )
+        .fetch(&*self.pool);
+
+        let mut result: Option<BlockHeader> = None;
+        while let Some(row) = rows.try_next().await? {
+            if result.is_some() {
+                return Err(ChainRepositoryError::MultipleTips);
+            }
+
+            let block_hash: String = row.try_get("block_hash")?;
+            let prev_block_hash: String = row.try_get("prev_block_hash")?;
+            let height: i64 = row.try_get("height")?;
+            let header = BlockHeader {
+                hash: block_hash.parse()?,
+                prev: prev_block_hash.parse()?,
+                height: height as u64,
+            };
+            result = Some(header);
+        }
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError> {
         // TODO: Should tx_inputs also be filtered on whether they're in a block??
         let mut rows = sqlx::query(
@@ -270,7 +299,7 @@ impl chain::ChainRepository for ChainRepository {
                                  FROM tx_inputs i
                                  WHERE o.tx_id = i.tx_id 
                                     AND o.output_index = i.output_index)
-               ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
+               ORDER BY o.address, b.height, o.tx_id, o.output_index"#,
         )
         .fetch(&*self.pool);
 
@@ -316,7 +345,7 @@ impl chain::ChainRepository for ChainRepository {
                 FROM tx_inputs i
                 WHERE o.tx_id = i.tx_id 
                     AND o.output_index = i.output_index)
-            ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
+            ORDER BY b.height, o.tx_id, o.output_index"#,
         )
         .bind(address.to_string())
         .fetch(&*self.pool);
@@ -359,7 +388,7 @@ impl chain::ChainRepository for ChainRepository {
                 FROM tx_inputs i
                 WHERE o.tx_id = i.tx_id 
                     AND o.output_index = i.output_index)
-            ORDER BY u.address, b.height, u.tx_id, u.output_index"#,
+            ORDER BY o.address, b.height, o.tx_id, o.output_index"#,
         )
         .bind(&addresses)
         .fetch(&*self.pool);

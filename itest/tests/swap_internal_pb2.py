@@ -9,44 +9,42 @@ from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import runtime_version as _runtime_version
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+
 _runtime_version.ValidateProtobufRuntimeVersion(
-    _runtime_version.Domain.PUBLIC,
-    5,
-    27,
-    2,
-    '',
-    'swap_internal.proto'
+    _runtime_version.Domain.PUBLIC, 5, 27, 2, "", "swap_internal.proto"
 )
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
-
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13swap_internal.proto\x12\rswap_internal\"-\n\x18\x41\x64\x64\x41\x64\x64ressFiltersRequest\x12\x11\n\taddresses\x18\x01 \x03(\t\"\x18\n\x16\x41\x64\x64\x41\x64\x64ressFiltersReply\"\x10\n\x0eGetInfoRequest\"5\n\x0cGetInfoReply\x12\x14\n\x0c\x62lock_height\x18\x01 \x01(\x04\x12\x0f\n\x07network\x18\x02 \x01(\t\"\xba\x01\n\x0eGetSwapRequest\x12\x14\n\x07\x61\x64\x64ress\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x1c\n\x0fpayment_request\x18\x02 \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0cpayment_hash\x18\x03 \x01(\x0cH\x02\x88\x01\x01\x12\x18\n\x0b\x64\x65stination\x18\x04 \x01(\tH\x03\x88\x01\x01\x42\n\n\x08_addressB\x12\n\x10_payment_requestB\x0f\n\r_payment_hashB\x0e\n\x0c_destination\"Y\n\x0cGetSwapReply\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12 \n\x13\x63onfirmation_height\x18\x02 \x01(\x04H\x00\x88\x01\x01\x42\x16\n\x14_confirmation_height\"\r\n\x0bStopRequest\"\x0b\n\tStopReply2\xc6\x02\n\x0bSwapManager\x12\x65\n\x11\x41\x64\x64\x41\x64\x64ressFilters\x12\'.swap_internal.AddAddressFiltersRequest\x1a%.swap_internal.AddAddressFiltersReply\"\x00\x12G\n\x07GetInfo\x12\x1d.swap_internal.GetInfoRequest\x1a\x1b.swap_internal.GetInfoReply\"\x00\x12G\n\x07GetSwap\x12\x1d.swap_internal.GetSwapRequest\x1a\x1b.swap_internal.GetSwapReply\"\x00\x12>\n\x04Stop\x12\x1a.swap_internal.StopRequest\x1a\x18.swap_internal.StopReply\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
+    b'\n\x13swap_internal.proto\x12\rswap_internal"-\n\x18\x41\x64\x64\x41\x64\x64ressFiltersRequest\x12\x11\n\taddresses\x18\x01 \x03(\t"\x18\n\x16\x41\x64\x64\x41\x64\x64ressFiltersReply"\x10\n\x0eGetInfoRequest"5\n\x0cGetInfoReply\x12\x14\n\x0c\x62lock_height\x18\x01 \x01(\x04\x12\x0f\n\x07network\x18\x02 \x01(\t"\x90\x01\n\x0eGetSwapRequest\x12\x14\n\x07\x61\x64\x64ress\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x1c\n\x0fpayment_request\x18\x02 \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0cpayment_hash\x18\x03 \x01(\x0cH\x02\x88\x01\x01\x42\n\n\x08_addressB\x12\n\x10_payment_requestB\x0f\n\r_payment_hash"K\n\x0cGetSwapReply\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12*\n\x07outputs\x18\x02 \x03(\x0b\x32\x19.swap_internal.SwapOutput"X\n\nSwapOutput\x12\x10\n\x08outpoint\x18\x01 \x01(\t\x12 \n\x13\x63onfirmation_height\x18\x02 \x01(\x04H\x00\x88\x01\x01\x42\x16\n\x14_confirmation_height"\r\n\x0bStopRequest"\x0b\n\tStopReply2\xc6\x02\n\x0bSwapManager\x12\x65\n\x11\x41\x64\x64\x41\x64\x64ressFilters\x12\'.swap_internal.AddAddressFiltersRequest\x1a%.swap_internal.AddAddressFiltersReply"\x00\x12G\n\x07GetInfo\x12\x1d.swap_internal.GetInfoRequest\x1a\x1b.swap_internal.GetInfoReply"\x00\x12G\n\x07GetSwap\x12\x1d.swap_internal.GetSwapRequest\x1a\x1b.swap_internal.GetSwapReply"\x00\x12>\n\x04Stop\x12\x1a.swap_internal.StopRequest\x1a\x18.swap_internal.StopReply"\x00\x62\x06proto3'
+)
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'swap_internal_pb2', _globals)
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "swap_internal_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
-  DESCRIPTOR._loaded_options = None
-  _globals['_ADDADDRESSFILTERSREQUEST']._serialized_start=38
-  _globals['_ADDADDRESSFILTERSREQUEST']._serialized_end=83
-  _globals['_ADDADDRESSFILTERSREPLY']._serialized_start=85
-  _globals['_ADDADDRESSFILTERSREPLY']._serialized_end=109
-  _globals['_GETINFOREQUEST']._serialized_start=111
-  _globals['_GETINFOREQUEST']._serialized_end=127
-  _globals['_GETINFOREPLY']._serialized_start=129
-  _globals['_GETINFOREPLY']._serialized_end=182
-  _globals['_GETSWAPREQUEST']._serialized_start=185
-  _globals['_GETSWAPREQUEST']._serialized_end=371
-  _globals['_GETSWAPREPLY']._serialized_start=373
-  _globals['_GETSWAPREPLY']._serialized_end=462
-  _globals['_STOPREQUEST']._serialized_start=464
-  _globals['_STOPREQUEST']._serialized_end=477
-  _globals['_STOPREPLY']._serialized_start=479
-  _globals['_STOPREPLY']._serialized_end=490
-  _globals['_SWAPMANAGER']._serialized_start=493
-  _globals['_SWAPMANAGER']._serialized_end=819
+    DESCRIPTOR._loaded_options = None
+    _globals["_ADDADDRESSFILTERSREQUEST"]._serialized_start = 38
+    _globals["_ADDADDRESSFILTERSREQUEST"]._serialized_end = 83
+    _globals["_ADDADDRESSFILTERSREPLY"]._serialized_start = 85
+    _globals["_ADDADDRESSFILTERSREPLY"]._serialized_end = 109
+    _globals["_GETINFOREQUEST"]._serialized_start = 111
+    _globals["_GETINFOREQUEST"]._serialized_end = 127
+    _globals["_GETINFOREPLY"]._serialized_start = 129
+    _globals["_GETINFOREPLY"]._serialized_end = 182
+    _globals["_GETSWAPREQUEST"]._serialized_start = 185
+    _globals["_GETSWAPREQUEST"]._serialized_end = 329
+    _globals["_GETSWAPREPLY"]._serialized_start = 331
+    _globals["_GETSWAPREPLY"]._serialized_end = 406
+    _globals["_SWAPOUTPUT"]._serialized_start = 408
+    _globals["_SWAPOUTPUT"]._serialized_end = 496
+    _globals["_STOPREQUEST"]._serialized_start = 498
+    _globals["_STOPREQUEST"]._serialized_end = 511
+    _globals["_STOPREPLY"]._serialized_start = 513
+    _globals["_STOPREPLY"]._serialized_end = 524
+    _globals["_SWAPMANAGER"]._serialized_start = 527
+    _globals["_SWAPMANAGER"]._serialized_end = 853
 # @@protoc_insertion_point(module_scope)

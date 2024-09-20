@@ -73,7 +73,12 @@ pub trait SwapRepository {
         &self,
         hash: &sha256::Hash,
     ) -> Result<Vec<OutPoint>, GetPaidUtxosError>;
-    async fn get_swap(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
+    async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
+    async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapError>;
+    async fn get_swap_by_payment_request(
+        &self,
+        payment_request: &str,
+    ) -> Result<SwapState, GetSwapError>;
     async fn get_swaps(
         &self,
         addresses: &[Address],

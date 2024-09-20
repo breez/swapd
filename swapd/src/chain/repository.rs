@@ -7,6 +7,8 @@ use super::types::{BlockHeader, Utxo};
 
 #[derive(Debug, Error)]
 pub enum ChainRepositoryError {
+    #[error("multiple tips")]
+    MultipleTips,
     #[error("{0}")]
     General(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -39,6 +41,7 @@ pub trait ChainRepository {
         addresses: &[Address],
     ) -> Result<Vec<Address>, ChainRepositoryError>;
     async fn get_block_headers(&self) -> Result<Vec<BlockHeader>, ChainRepositoryError>;
+    async fn get_tip(&self) -> Result<Option<BlockHeader>, ChainRepositoryError>;
     async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError>;
     async fn get_utxos_for_address(
         &self,

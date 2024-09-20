@@ -11,6 +11,8 @@ pub enum ChainError {
     EmptyChain,
     #[error("invalid chain")]
     InvalidChain,
+    #[error("block not found")]
+    BlockNotFound,
     #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }

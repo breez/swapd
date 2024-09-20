@@ -13,6 +13,7 @@ import re
 import time
 import docker
 
+
 def get_crash_log(swapd):
     if swapd.may_fail:
         return None, None
@@ -90,6 +91,9 @@ def swapd_factory(
 
     for e in errs:
         teardown_checks.add_error(e)
+
+    for n in sf.instances:
+        n.daemon.logs_catchup()
 
     def map_swapd_error(instances, f, msg):
         ret = False

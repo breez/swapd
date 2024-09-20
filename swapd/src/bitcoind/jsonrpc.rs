@@ -6,8 +6,6 @@ use serde_json::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RpcServerMessage {
-    pub jsonrpc: String,
-
     #[serde(flatten)]
     pub body: RpcServerMessageBody,
 }
@@ -41,7 +39,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_notification() {
-        let json = r#"{"jsonrpc":"2.0","method":"test","params":{}}"#;
+        let json = r#"{"method":"test","params":{}}"#;
         let notification = serde_json::from_str::<RpcServerMessage>(json).unwrap();
         assert!(matches!(
             notification.body,
@@ -51,7 +49,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_response() {
-        let json = r#"{"jsonrpc":"2.0","id":"test","result":{}}"#;
+        let json = r#"{"id":"test","result":{}}"#;
         let notification = serde_json::from_str::<RpcServerMessage>(json).unwrap();
         assert!(matches!(
             notification.body,
@@ -61,14 +59,14 @@ mod tests {
 
     #[test]
     fn test_deserialize_error() {
-        let json = r#"{"jsonrpc":"2.0","id":"test","error":{"code":1,"message":"test","data":{}}}"#;
+        let json = r#"{"id":"test","error":{"code":1,"message":"test","data":{}}}"#;
         let error = serde_json::from_str::<RpcServerMessage>(json).unwrap();
         assert!(matches!(error.body, RpcServerMessageBody::Error { .. }))
     }
 
     #[test]
     fn test_deserialize_error_without_data() {
-        let json = r#"{"jsonrpc":"2.0","id":"test","error":{"code":1,"message":"test"}}"#;
+        let json = r#"{"id":"test","error":{"code":1,"message":"test"}}"#;
         let error = serde_json::from_str::<RpcServerMessage>(json).unwrap();
         assert!(matches!(error.body, RpcServerMessageBody::Error { .. }))
     }

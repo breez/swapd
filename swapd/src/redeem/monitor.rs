@@ -1,8 +1,10 @@
-use std::{collections::HashMap, future::Future, sync::Arc, time::SystemTime};
+use std::time::Duration;
+use std::{collections::HashMap, future::Future, pin::pin, sync::Arc, time::SystemTime};
 
+use futures::future::{FusedFuture, FutureExt};
 use futures::{stream::FuturesUnordered, StreamExt};
 use tokio::join;
-use tracing::{error, field, warn};
+use tracing::{debug, error, field, warn};
 
 use crate::{
     chain::{
@@ -32,6 +34,7 @@ where
     chain_client: Arc<CC>,
     chain_repository: Arc<CR>,
     fee_estimator: Arc<FE>,
+    poll_interval: Duration,
     swap_repository: Arc<SR>,
     swap_service: Arc<SwapService<P>>,
     redeem_repository: Arc<RR>,
@@ -52,6 +55,7 @@ where
         chain_client: Arc<CC>,
         chain_repository: Arc<CR>,
         fee_estimator: Arc<FE>,
+        poll_interval: Duration,
         swap_repository: Arc<SR>,
         swap_service: Arc<SwapService<P>>,
         redeem_repository: Arc<RR>,
@@ -61,6 +65,7 @@ where
             chain_client,
             chain_repository,
             fee_estimator,
+            poll_interval,
             swap_repository,
             swap_service,
             redeem_repository,
@@ -72,6 +77,11 @@ where
     // TODO: add intervals to the loop
     // TODO: add proper error handling
     pub async fn start<F: Future<Output = ()>>(&self, signal: F) -> Result<(), RedeemError> {
+        let mut sig = pin!(signal.fuse());
+        if sig.is_terminated() {
+            return Ok(());
+        }
+
         loop {
             let utxos = self.chain_repository.get_utxos().await?;
             let addresses: Vec<_> = utxos.iter().map(|u| u.address.clone()).collect();
@@ -171,7 +181,17 @@ where
             while let Some(result) = redeem_tasks.next().await {
                 // TODO: Handle result
             }
+
+            tokio::select! {
+                _ = &mut sig => {
+                    debug!("redeem monitor shutting down");
+                    break;
+                }
+                _ = tokio::time::sleep(self.poll_interval) => {}
+            }
         }
+
+        Ok(())
     }
 }
 
@@ -184,6 +204,7 @@ impl From<bitcoin::address::Error> for RedeemError {
 impl From<ChainRepositoryError> for RedeemError {
     fn from(value: ChainRepositoryError) -> Self {
         match value {
+            ChainRepositoryError::MultipleTips => RedeemError::General(Box::new(value)),
             ChainRepositoryError::General(e) => RedeemError::General(e),
         }
     }
@@ -196,6 +217,7 @@ impl From<ChainError> for RedeemError {
             ChainError::Database(_) => RedeemError::General(Box::new(value)),
             ChainError::EmptyChain => RedeemError::General(Box::new(value)),
             ChainError::InvalidChain => RedeemError::General(Box::new(value)),
+            ChainError::BlockNotFound => RedeemError::General(Box::new(value)),
         }
     }
 }

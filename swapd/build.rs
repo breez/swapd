@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-changed=migrations");
     tonic_build::configure()
         .build_server(true)
         .compile(&["proto/swap/swap.proto"], &["proto/swap"])

@@ -2,7 +2,7 @@ use std::{collections::HashMap, future::Future, pin::pin, sync::Arc, time::Durat
 
 use bitcoin::{block::Bip34Error, Address, Block, BlockHash, Network, OutPoint};
 use futures::future::{FusedFuture, FutureExt};
-use tracing::debug;
+use tracing::{debug, field, info};
 
 use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Utxo};
 
@@ -40,7 +40,7 @@ where
 
     pub async fn start<F: Future<Output = ()>>(&self, signal: F) -> Result<(), ChainError> {
         let blocks = self.chain_repository.get_block_headers().await?;
-        let chain = match Chain::try_from(blocks) {
+        let mut chain = match Chain::try_from(blocks) {
             Ok(chain) => chain,
             Err(e) => match e {
                 ChainError::EmptyChain => {
@@ -57,16 +57,7 @@ where
                     self.chain_repository
                         .add_block(&birthday_header, &Vec::new(), &Vec::new())
                         .await?;
-                    let mut chain = Chain::new(birthday_header.hash);
-                    chain.blocks.insert(
-                        birthday_header.hash,
-                        BlockInfo {
-                            hash: birthday_header.hash,
-                            prev: birthday_header.prev,
-                            next: None,
-                        },
-                    );
-                    chain
+                    Chain::new(birthday_header)
                 }
                 _ => return Err(e),
             },
@@ -78,7 +69,7 @@ where
         }
 
         loop {
-            self.do_sync(&chain).await?;
+            chain = self.do_sync(&chain).await?;
 
             tokio::select! {
                 _ = &mut sig => {
@@ -97,62 +88,61 @@ where
         C: ChainClient,
         R: ChainRepository,
     {
+        debug!("chain sync starting");
         let tip_hash = self.chain_client.get_tip_hash().await?;
-        let mut new_chain = Chain::new(tip_hash);
-        let mut current_hash = tip_hash;
-        let mut next_hash = None;
+        let mut current_header = self.chain_client.get_block_header(&tip_hash).await?;
+        let mut new_chain = Chain::new(current_header.clone());
 
         // Iterate backwards from the tip to get the missed block headers.
         loop {
+            debug!(
+                "got block header {}, height {}",
+                current_header.hash, current_header.height
+            );
             // Note that this is not checking the existing tip, because the chain
             // may have reorged.
-            if existing_chain.blocks.contains_key(&current_hash) {
+            if existing_chain.contains_block(&current_header.hash) {
                 break;
             }
 
-            let current_header = self.chain_client.get_block_header(&current_hash).await?;
-            new_chain.blocks.insert(
-                tip_hash,
-                BlockInfo {
-                    hash: current_hash,
-                    prev: current_header.prev,
-                    next: next_hash,
-                },
-            );
-            current_hash = current_header.prev;
-            next_hash = Some(current_hash);
+            current_header = self
+                .chain_client
+                .get_block_header(&current_header.prev)
+                .await?;
+            new_chain.prepend(current_header.clone())?;
         }
 
         // If the base and tip don't match, there was a reorg.
+        debug!(
+            "block headers caught up. new chain base: {}, existing chain tip: {}",
+            new_chain.base, existing_chain.tip
+        );
         if new_chain.base != existing_chain.tip {
-            let mut reorg_block_hash = existing_chain.tip;
-            loop {
-                if new_chain.blocks.contains_key(&reorg_block_hash) {
+            for reorg_block in existing_chain.iter_backwards() {
+                if new_chain.contains_block(&reorg_block.hash) {
                     break;
                 }
 
-                self.chain_repository.undo_block(reorg_block_hash).await?;
-                let reorg_block = existing_chain
-                    .blocks
-                    .get(&reorg_block_hash)
-                    .expect("in-memory chain does not contain expected block!");
-                reorg_block_hash = reorg_block.prev;
+                debug!(
+                    "block {} was reorged out of the chain, undoing block",
+                    reorg_block.hash
+                );
+                self.chain_repository.undo_block(reorg_block.hash).await?;
             }
         }
 
         // Iterate forward from the last known block to the tip to process blocks.
         // Note that this always re-processes the last known block.
-        let mut current_block = &new_chain.blocks[&new_chain.base];
-        loop {
+        for current_block in new_chain.iter_forwards() {
+            debug!(
+                "processing block {}, height {}",
+                current_block.hash, current_block.height
+            );
             let block = self.chain_client.get_block(&current_block.hash).await?;
             self.process_block(&block).await?;
-            match current_block.next {
-                Some(next) => current_block = &new_chain.blocks[&next],
-                None => break,
-            }
         }
 
-        new_chain.rebase(existing_chain);
+        new_chain.rebase(existing_chain)?;
 
         Ok(new_chain)
     }
@@ -170,7 +160,10 @@ where
         for tx in &block.txdata {
             let txid = tx.txid();
             for (vout, output) in tx.output.iter().enumerate() {
-                let address = Address::from_script(&output.script_pubkey, self.network)?;
+                let address = match Address::from_script(&output.script_pubkey, self.network) {
+                    Ok(address) => address,
+                    Err(_) => continue,
+                };
                 addresses.push(address.clone());
                 let entry = address_utxos.entry(address).or_insert(Vec::new());
                 entry.push((OutPoint::new(txid, vout as u32), output.value));
@@ -208,6 +201,12 @@ where
             })
             .flat_map(|a: Vec<AddressUtxo>| a)
             .collect();
+
+        debug!(
+            "block {} contains {} utxos to watched addresses",
+            block_hash,
+            watch_utxos.len()
+        );
         self.chain_repository
             .add_block(
                 &BlockHeader {
@@ -232,34 +231,164 @@ struct Chain {
 
 #[derive(Clone)]
 struct BlockInfo {
-    hash: BlockHash,
-    prev: BlockHash,
+    header: BlockHeader,
     next: Option<BlockHash>,
 }
 
 impl Chain {
-    fn new(tip: BlockHash) -> Self {
-        Chain {
-            tip,
-            base: tip,
+    fn new(tip: BlockHeader) -> Self {
+        let mut chain = Chain {
+            tip: tip.hash,
+            base: tip.hash,
             blocks: HashMap::new(),
+        };
+        chain.blocks.insert(
+            tip.hash,
+            BlockInfo {
+                header: tip,
+                next: None,
+            },
+        );
+        chain
+    }
+
+    fn contains_block(&self, hash: &BlockHash) -> bool {
+        self.blocks.contains_key(hash)
+    }
+
+    fn get_block(&self, hash: &BlockHash) -> Result<BlockHeader, ChainError> {
+        match self.blocks.get(hash) {
+            Some(block) => Ok(block.header.clone()),
+            None => Err(ChainError::BlockNotFound),
         }
     }
 
-    fn rebase(&mut self, other: &Chain) {
-        let mut next_block = self.blocks[&self.base].clone();
+    fn prepend(&mut self, base: BlockHeader) -> Result<(), ChainError> {
+        let old_base = self
+            .blocks
+            .get(&self.base)
+            .expect("chain doesn't contain its own base");
+        if old_base.header.prev != base.hash {
+            return Err(ChainError::InvalidChain);
+        }
+
+        self.base = base.hash;
+        self.blocks.insert(
+            base.hash,
+            BlockInfo {
+                header: base,
+                next: Some(old_base.header.hash),
+            },
+        );
+        Ok(())
+    }
+
+    fn rebase(&mut self, other: &Chain) -> Result<(), ChainError> {
+        let mut next_block = self
+            .blocks
+            .get(&self.base)
+            .expect("chain doesn't contain its own base")
+            .header
+            .clone();
         loop {
             if next_block.hash == other.base {
                 break;
             }
 
-            let mut current_block = other.blocks[&next_block.prev].clone();
-            current_block.next = Some(next_block.hash);
-            self.base = current_block.hash;
-            self.blocks
-                .insert(current_block.hash, current_block.clone());
+            let current_block = other.get_block(&next_block.prev)?;
+            self.prepend(current_block.clone())?;
             next_block = current_block;
         }
+
+        Ok(())
+    }
+
+    fn iter_forwards(&self) -> ForwardChainIterator {
+        ForwardChainIterator::new(self)
+    }
+
+    fn iter_backwards(&self) -> BackwardChainIterator {
+        BackwardChainIterator::new(self)
+    }
+}
+
+struct ForwardChainIterator<'a> {
+    chain: &'a Chain,
+    current: Option<&'a BlockInfo>,
+}
+
+impl<'a> ForwardChainIterator<'a> {
+    fn new(chain: &'a Chain) -> Self {
+        let current = chain
+            .blocks
+            .get(&chain.base)
+            .expect("chain does not contain its own base");
+        ForwardChainIterator {
+            chain,
+            current: Some(current),
+        }
+    }
+}
+
+impl<'a> Iterator for ForwardChainIterator<'a> {
+    type Item = &'a BlockHeader;
+    fn next(&mut self) -> Option<&'a BlockHeader> {
+        let current = match self.current {
+            Some(current) => current,
+            None => return None,
+        };
+
+        self.current = match current.next {
+            Some(next) => Some(
+                self.chain
+                    .blocks
+                    .get(&next)
+                    .expect("chain does not contain expected next block"),
+            ),
+            None => None,
+        };
+
+        Some(&current.header)
+    }
+}
+
+struct BackwardChainIterator<'a> {
+    chain: &'a Chain,
+    current: Option<&'a BlockInfo>,
+}
+
+impl<'a> BackwardChainIterator<'a> {
+    fn new(chain: &'a Chain) -> Self {
+        let current = chain
+            .blocks
+            .get(&chain.tip)
+            .expect("chain doesn't contain its own tip");
+        BackwardChainIterator {
+            chain,
+            current: Some(current),
+        }
+    }
+}
+
+impl<'a> Iterator for BackwardChainIterator<'a> {
+    type Item = &'a BlockHeader;
+    fn next(&mut self) -> Option<&'a BlockHeader> {
+        let current = match self.current {
+            Some(current) => current,
+            None => return None,
+        };
+
+        self.current = match current.header.hash == self.chain.base {
+            true => None,
+            false => Some(
+                self.chain
+                    .blocks
+                    .get(&current.header.prev)
+                    .expect("chain does not contain expected prev block"),
+            ),
+        };
+
+        Some(&current.header)
     }
 }
 
@@ -271,31 +400,10 @@ impl TryFrom<Vec<super::types::BlockHeader>> for Chain {
             return Err(ChainError::EmptyChain);
         }
 
-        let tip_header = &headers[0];
-        let mut chain = Chain::new(tip_header.hash);
-        chain.blocks.insert(
-            tip_header.hash,
-            BlockInfo {
-                hash: tip_header.hash,
-                prev: tip_header.prev,
-                next: None,
-            },
-        );
-        let mut next = tip_header;
-        for header in headers.iter().skip(1) {
-            if header.hash != next.prev {
-                return Err(ChainError::InvalidChain);
-            }
-            chain.blocks.insert(
-                header.hash,
-                BlockInfo {
-                    hash: header.hash,
-                    prev: header.prev,
-                    next: Some(next.hash),
-                },
-            );
-            chain.base = header.hash;
-            next = header;
+        let tip_header = headers[0].clone();
+        let mut chain = Chain::new(tip_header);
+        for header in headers.into_iter().skip(1) {
+            chain.prepend(header)?;
         }
         Ok(chain)
     }
@@ -312,3 +420,5 @@ impl From<Bip34Error> for ChainError {
         ChainError::General(Box::new(value))
     }
 }
+
+mod tests {}

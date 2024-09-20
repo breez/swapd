@@ -1,7 +1,13 @@
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import ClassVar as _ClassVar, Iterable as _Iterable, Optional as _Optional
+from typing import (
+    ClassVar as _ClassVar,
+    Iterable as _Iterable,
+    Mapping as _Mapping,
+    Optional as _Optional,
+    Union as _Union,
+)
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -25,27 +31,46 @@ class GetInfoReply(_message.Message):
     NETWORK_FIELD_NUMBER: _ClassVar[int]
     block_height: int
     network: str
-    def __init__(self, block_height: _Optional[int] = ..., network: _Optional[str] = ...) -> None: ...
+    def __init__(
+        self, block_height: _Optional[int] = ..., network: _Optional[str] = ...
+    ) -> None: ...
 
 class GetSwapRequest(_message.Message):
-    __slots__ = ("address", "payment_request", "payment_hash", "destination")
+    __slots__ = ("address", "payment_request", "payment_hash")
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
     PAYMENT_REQUEST_FIELD_NUMBER: _ClassVar[int]
     PAYMENT_HASH_FIELD_NUMBER: _ClassVar[int]
-    DESTINATION_FIELD_NUMBER: _ClassVar[int]
     address: str
     payment_request: str
     payment_hash: bytes
-    destination: str
-    def __init__(self, address: _Optional[str] = ..., payment_request: _Optional[str] = ..., payment_hash: _Optional[bytes] = ..., destination: _Optional[str] = ...) -> None: ...
+    def __init__(
+        self,
+        address: _Optional[str] = ...,
+        payment_request: _Optional[str] = ...,
+        payment_hash: _Optional[bytes] = ...,
+    ) -> None: ...
 
 class GetSwapReply(_message.Message):
-    __slots__ = ("address", "confirmation_height")
+    __slots__ = ("address", "outputs")
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
-    CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    OUTPUTS_FIELD_NUMBER: _ClassVar[int]
     address: str
+    outputs: _containers.RepeatedCompositeFieldContainer[SwapOutput]
+    def __init__(
+        self,
+        address: _Optional[str] = ...,
+        outputs: _Optional[_Iterable[_Union[SwapOutput, _Mapping]]] = ...,
+    ) -> None: ...
+
+class SwapOutput(_message.Message):
+    __slots__ = ("outpoint", "confirmation_height")
+    OUTPOINT_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    outpoint: str
     confirmation_height: int
-    def __init__(self, address: _Optional[str] = ..., confirmation_height: _Optional[int] = ...) -> None: ...
+    def __init__(
+        self, outpoint: _Optional[str] = ..., confirmation_height: _Optional[int] = ...
+    ) -> None: ...
 
 class StopRequest(_message.Message):
     __slots__ = ()

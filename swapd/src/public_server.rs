@@ -268,7 +268,7 @@ where
         }
 
         let hash = invoice.payment_hash();
-        let swap_state = self.swap_repository.get_swap(hash).await?;
+        let swap_state = self.swap_repository.get_swap_by_hash(hash).await?;
         if swap_state.preimage.is_some() {
             trace!("swap already had preimage");
             return Err(Status::failed_precondition("swap already paid"));
@@ -293,7 +293,7 @@ where
         let utxos = utxos
             .into_iter()
             .filter(|utxo| {
-                let confirmations = current_height.saturating_sub(utxo.block_height);
+                let confirmations = (current_height + 1).saturating_sub(utxo.block_height);
                 if confirmations < self.min_confirmations {
                     debug!(
                         outpoint = field::display(utxo.outpoint),
@@ -350,7 +350,7 @@ where
         // is redeemable within reasonable time.
         let fee_estimate = self.fee_estimator.estimate_fee(6).await?;
         let fake_address = Address::p2wpkh(
-            &PublicKey::from_slice(&[0x04; 33]).map_err(|e| {
+            &PublicKey::from_slice(&[0x02; 33]).map_err(|e| {
                 error!("failed to create fake pubkey: {:?}", e);
                 Status::internal("internal error")
             })?,
@@ -500,6 +500,10 @@ impl From<ChainError> for Status {
                 error!("got invalid chain error");
                 Status::internal("internal error")
             }
+            ChainError::BlockNotFound => {
+                error!("got block not found error");
+                Status::internal("internal error")
+            }
         }
     }
 }
@@ -529,6 +533,10 @@ impl From<PayError> for Status {
 impl From<ChainRepositoryError> for Status {
     fn from(value: ChainRepositoryError) -> Self {
         match value {
+            ChainRepositoryError::MultipleTips => {
+                error!("chain has multiple tips");
+                Status::internal("internal error")
+            }
             ChainRepositoryError::General(e) => {
                 error!("failed to get chain data: {:?}", e);
                 Status::internal("internal error")
