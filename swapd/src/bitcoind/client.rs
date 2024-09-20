@@ -1,13 +1,13 @@
 use std::str::FromStr;
 
 use bitcoin::{
-    consensus::{deserialize, encode::serialize_hex, Decodable, Encodable},
+    consensus::{deserialize, encode::serialize_hex, Decodable},
     hashes::{hex::FromHex, sha256d},
     Address, Block, BlockHash, Network, OutPoint, Transaction,
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{Number, Value};
+use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{debug, trace};
 

@@ -132,11 +132,11 @@ impl chain::ChainRepository for ChainRepository {
         .execute(&mut *tx)
         .await?;
 
-        self.add_utxos(&mut *tx, tx_outputs).await?;
+        self.add_utxos(&mut tx, tx_outputs).await?;
 
         // TODO: Ensure the transaction isolation level picks up on the newly
         // added utxos above too.
-        self.mark_spent(&mut *tx, tx_inputs).await?;
+        self.mark_spent(&mut tx, tx_inputs).await?;
 
         // correlate the transactions to the blocks
         let mut txns: Vec<_> = tx_outputs
@@ -180,21 +180,6 @@ impl chain::ChainRepository for ChainRepository {
                ON CONFLICT DO NOTHING"#,
         )
         .bind(address.to_string())
-        .execute(&*self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    async fn add_watch_addresses(&self, addresses: &[Address]) -> Result<(), ChainRepositoryError> {
-        let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
-        sqlx::query(
-            r#"INSERT INTO watch_addresses (address) 
-               SELECT * FROM UNNEST($1::text[]) 
-               ON CONFLICT DO NOTHING"#,
-        )
-        .bind(addresses)
         .execute(&*self.pool)
         .await?;
 

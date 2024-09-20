@@ -14,19 +14,15 @@ pub enum SwapPersistenceError {
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
-#[derive(Debug)]
-pub enum AddPreimageError {
-    DoesNotExist,
-    General(Box<dyn std::error::Error + Sync + Send>),
-}
-
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum AddPaymentResultError {
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum GetPaidUtxosError {
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 

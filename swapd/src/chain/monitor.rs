@@ -2,7 +2,7 @@ use std::{collections::HashMap, future::Future, pin::pin, sync::Arc, time::Durat
 
 use bitcoin::{block::Bip34Error, Address, Block, BlockHash, Network, OutPoint};
 use futures::future::{FusedFuture, FutureExt};
-use tracing::{debug, field, info};
+use tracing::debug;
 
 use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Utxo};
 

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
@@ -7,13 +7,13 @@ use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
-use redeem::RedeemMonitor;
+use redeem::{RedeemMonitor, RedeemMonitorParams};
 use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Certificate, Identity, Server, Uri};
-use tracing::{debug, field, info, warn};
+use tracing::{field, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use whatthefee::WhatTheFeeEstimator;
 
@@ -173,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cln_client = Arc::new(cln::Client::new(cln_conn, args.network));
     let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
     if args.auto_migrate {
-        postgresql::migrate(&*pgpool).await?;
+        postgresql::migrate(&pgpool).await?;
     }
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
         Arc::clone(&pgpool),
@@ -192,21 +192,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
     fee_estimator.start().await?;
-    let swapper_server = SwapperServer::new(SwapServer::new(
-        &SwapServerParams {
-            network: args.network,
-            max_swap_amount_sat: args.max_swap_amount_sat,
-            min_confirmations: args.min_confirmations,
-            min_redeem_blocks: args.min_redeem_blocks,
-        },
-        Arc::clone(&chain_client),
-        Arc::clone(&chain_filter),
-        Arc::clone(&chain_repository),
-        Arc::clone(&cln_client),
-        Arc::clone(&swap_service),
-        Arc::clone(&swap_repository),
-        Arc::clone(&fee_estimator),
-    ));
+    let swapper_server = SwapperServer::new(SwapServer::new(SwapServerParams {
+        network: args.network,
+        max_swap_amount_sat: args.max_swap_amount_sat,
+        min_confirmations: args.min_confirmations,
+        min_redeem_blocks: args.min_redeem_blocks,
+        chain_service: Arc::clone(&chain_client),
+        chain_filter_service: Arc::clone(&chain_filter),
+        chain_repository: Arc::clone(&chain_repository),
+        lightning_client: Arc::clone(&cln_client),
+        swap_service: Arc::clone(&swap_service),
+        swap_repository: Arc::clone(&swap_repository),
+        fee_estimator: Arc::clone(&fee_estimator),
+    }));
 
     let token = CancellationToken::new();
     let internal_server = SwapManagerServer::new(internal_server::Server::new(
@@ -222,16 +220,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&chain_repository),
         Duration::from_secs(args.chain_poll_interval_seconds),
     );
-    let redeem_monitor = RedeemMonitor::new(
-        Arc::clone(&chain_client),
-        Arc::clone(&chain_repository),
-        Arc::clone(&fee_estimator),
-        Duration::from_secs(args.redeem_poll_interval_seconds),
-        Arc::clone(&swap_repository),
-        Arc::clone(&swap_service),
-        Arc::clone(&redeem_repository),
-        Arc::clone(&cln_client),
-    );
+    let redeem_monitor = RedeemMonitor::new(RedeemMonitorParams {
+        chain_client: Arc::clone(&chain_client),
+        chain_repository: Arc::clone(&chain_repository),
+        fee_estimator: Arc::clone(&fee_estimator),
+        poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
+        swap_repository: Arc::clone(&swap_repository),
+        swap_service: Arc::clone(&swap_service),
+        redeem_repository: Arc::clone(&redeem_repository),
+        wallet: Arc::clone(&cln_client),
+    });
 
     let server_token = token.clone();
     let internal_server_token = token.clone();

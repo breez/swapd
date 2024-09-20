@@ -10,7 +10,5 @@ use sqlx::{Pool, Postgres};
 pub use swap_repository::SwapRepository;
 
 pub async fn migrate(pool: &Pool<Postgres>) -> Result<(), sqlx::migrate::MigrateError> {
-    sqlx::migrate!("src/postgresql/migrations")
-        .run(&*pool)
-        .await
+    sqlx::migrate!("src/postgresql/migrations").run(pool).await
 }

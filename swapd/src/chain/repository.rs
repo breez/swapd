@@ -35,7 +35,6 @@ pub trait ChainRepository {
         tx_inputs: &[SpentTxo],
     ) -> Result<(), ChainRepositoryError>;
     async fn add_watch_address(&self, address: &Address) -> Result<(), ChainRepositoryError>;
-    async fn add_watch_addresses(&self, addresses: &[Address]) -> Result<(), ChainRepositoryError>;
     async fn filter_watch_addresses(
         &self,
         addresses: &[Address],

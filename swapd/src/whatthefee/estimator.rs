@@ -5,6 +5,7 @@ use std::{
 
 use serde::Deserialize;
 use tokio::{sync::Mutex, time::MissedTickBehavior};
+use tracing::error;
 
 use crate::chain::{FeeEstimate, FeeEstimateError, FeeEstimator};
 
@@ -53,7 +54,10 @@ impl WhatTheFeeEstimator {
                 interval.tick().await;
                 let fees = match get_fees().await {
                     Ok(fees) => fees,
-                    Err(e) => break,
+                    Err(e) => {
+                        error!("failed to get fees: {:?}", e);
+                        continue;
+                    }
                 };
                 *last_response.lock().await = Some(fees);
             }
@@ -73,7 +77,7 @@ impl FeeEstimator for WhatTheFeeEstimator {
         let now = SystemTime::now();
         let response_age = match now.duration_since(last_response.timestamp) {
             Ok(response_age) => response_age,
-            Err(e) => return Err(FeeEstimateError::Unavailable),
+            Err(_) => return Err(FeeEstimateError::Unavailable),
         };
 
         if response_age.as_secs() > STALE_SECONDS {
@@ -103,12 +107,12 @@ impl FeeEstimator for WhatTheFeeEstimator {
         let mut column_index = 0;
         let mut prev_column: f64 = match last_response.columns[column_index].parse() {
             Ok(prev_column) => prev_column,
-            Err(e) => return Err(FeeEstimateError::Unavailable),
+            Err(_) => return Err(FeeEstimateError::Unavailable),
         };
         for (i, current_column) in last_response.columns.iter().skip(1).enumerate() {
             let current_column: f64 = match current_column.parse() {
                 Ok(current_column) => current_column,
-                Err(e) => return Err(FeeEstimateError::Unavailable),
+                Err(_) => return Err(FeeEstimateError::Unavailable),
             };
 
             if (current_column - certainty).abs() < (prev_column - certainty).abs() {

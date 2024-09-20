@@ -34,8 +34,7 @@ impl Wallet for Client {
 impl From<GetClientError> for WalletError {
     fn from(value: GetClientError) -> Self {
         match value {
-            GetClientError::ConnectionFailed => WalletError::General(Box::new(value)),
-            GetClientError::General(e) => WalletError::General(e),
+            GetClientError::ConnectionFailed(_) => WalletError::General(Box::new(value)),
         }
     }
 }

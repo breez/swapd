@@ -12,7 +12,6 @@ use tracing::{instrument, warn};
 use crate::{
     chain::ChainRepository,
     chain_filter::ChainFilterRepository,
-    public_server::swap_api::SwapError,
     swap::{GetSwapError, SwapRepository},
 };
 

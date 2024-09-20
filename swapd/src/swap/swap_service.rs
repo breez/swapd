@@ -10,6 +10,7 @@ use bitcoin::{
     Address, Network, PrivateKey, PublicKey, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
     Weight, Witness,
 };
+use thiserror::Error;
 use tracing::{debug, field, instrument, trace};
 
 use crate::chain::{FeeEstimate, Utxo};
@@ -60,13 +61,19 @@ pub enum CreateSwapError {
     PrivateKeyError,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum CreateRedeemTxError {
+    #[error("invalid block height")]
     InvalidBlockHeight,
+    #[error("invalid weight")]
     InvalidWeight,
+    #[error("invalid signing data")]
     InvalidSigningData,
+    #[error("invalid message")]
     InvalidMessage,
+    #[error("invalid secret key")]
     InvalidSecretKey,
+    #[error("amount too low")]
     AmountTooLow,
 }
 

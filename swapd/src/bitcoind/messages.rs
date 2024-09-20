@@ -68,6 +68,7 @@ impl<'de> Deserialize<'de> for GetRawTransactionResponse {
 }
 
 pub struct SendRawTransactionResponse {
+    #[allow(unused)]
     pub hex: String,
 }
 

@@ -226,22 +226,19 @@ impl From<tonic::Status> for PayError {
 #[derive(Debug, Error)]
 pub(super) enum GetClientError {
     #[error("connection failed")]
-    ConnectionFailed,
-    #[error("{0}")]
-    General(Box<dyn std::error::Error + Sync + Send>),
+    ConnectionFailed(Box<dyn std::error::Error + Sync + Send>),
 }
 
 impl From<tonic::transport::Error> for GetClientError {
-    fn from(_value: tonic::transport::Error) -> Self {
-        GetClientError::ConnectionFailed
+    fn from(value: tonic::transport::Error) -> Self {
+        GetClientError::ConnectionFailed(Box::new(value))
     }
 }
 
 impl From<GetClientError> for PayError {
     fn from(value: GetClientError) -> Self {
         match value {
-            GetClientError::ConnectionFailed => PayError::ConnectionFailed,
-            GetClientError::General(e) => PayError::General(Status::internal("internal error")),
+            GetClientError::ConnectionFailed(_) => PayError::ConnectionFailed,
         }
     }
 }

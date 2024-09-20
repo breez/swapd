@@ -16,8 +16,8 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, AddPreimageError, GetPaidUtxosError, GetSwapError, GetSwapsError,
-        PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapError, GetSwapsError, PaymentAttempt,
+        Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
     },
 };
 
@@ -464,12 +464,6 @@ impl From<sqlx::Error> for SwapPersistenceError {
 impl From<SystemTimeError> for SwapPersistenceError {
     fn from(value: SystemTimeError) -> Self {
         SwapPersistenceError::General(Box::new(value))
-    }
-}
-
-impl From<sqlx::Error> for AddPreimageError {
-    fn from(value: sqlx::Error) -> Self {
-        AddPreimageError::General(Box::new(value))
     }
 }
 

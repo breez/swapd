@@ -1,9 +1,13 @@
 use bitcoin::Address;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum WalletError {
+    #[error("creation failed")]
     CreationFailed,
+    #[error("invalid address: {0}")]
     InvalidAddress(bitcoin::address::Error),
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 

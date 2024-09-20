@@ -36,11 +36,27 @@ pub mod swap_api {
 }
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];
-pub struct SwapServerParams {
+pub struct SwapServerParams<C, CF, CR, L, P, R, F>
+where
+    C: ChainClient,
+    CF: ChainFilterService,
+    CR: ChainRepository,
+    L: LightningClient,
+    P: PrivateKeyProvider,
+    R: SwapRepository,
+    F: FeeEstimator,
+{
     pub network: Network,
     pub max_swap_amount_sat: u64,
     pub min_confirmations: u64,
     pub min_redeem_blocks: u32,
+    pub chain_service: Arc<C>,
+    pub chain_filter_service: Arc<CF>,
+    pub chain_repository: Arc<CR>,
+    pub lightning_client: Arc<L>,
+    pub swap_service: Arc<SwapService<P>>,
+    pub swap_repository: Arc<R>,
+    pub fee_estimator: Arc<F>,
 }
 
 #[derive(Debug)]
@@ -77,28 +93,19 @@ where
     R: SwapRepository,
     F: FeeEstimator,
 {
-    pub fn new(
-        params: &SwapServerParams,
-        chain_service: Arc<C>,
-        chain_filter_service: Arc<CF>,
-        chain_repository: Arc<CR>,
-        lightning_client: Arc<L>,
-        swap_service: Arc<SwapService<P>>,
-        swap_repository: Arc<R>,
-        fee_estimator: Arc<F>,
-    ) -> Self {
+    pub fn new(params: SwapServerParams<C, CF, CR, L, P, R, F>) -> Self {
         SwapServer {
             network: params.network,
             min_confirmations: params.min_confirmations,
             min_redeem_blocks: params.min_redeem_blocks,
             max_swap_amount_sat: params.max_swap_amount_sat,
-            chain_service,
-            chain_filter_service,
-            chain_repository,
-            lightning_client,
-            swap_service,
-            swap_repository,
-            fee_estimator,
+            chain_service: params.chain_service,
+            chain_filter_service: params.chain_filter_service,
+            chain_repository: params.chain_repository,
+            lightning_client: params.lightning_client,
+            swap_service: params.swap_service,
+            swap_repository: params.swap_repository,
+            fee_estimator: params.fee_estimator,
         }
     }
 }

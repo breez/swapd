@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
 use bitcoin::{Address, Transaction};
+use thiserror::Error;
 
 #[derive(Debug)]
 pub struct Redeem {
@@ -10,8 +11,9 @@ pub struct Redeem {
     pub fee_per_kw: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum RedeemRepositoryError {
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 

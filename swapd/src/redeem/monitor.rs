@@ -3,6 +3,7 @@ use std::{collections::HashMap, future::Future, pin::pin, sync::Arc, time::Syste
 
 use futures::future::{FusedFuture, FutureExt};
 use futures::{stream::FuturesUnordered, StreamExt};
+use thiserror::Error;
 use tokio::join;
 use tracing::{debug, error, field, warn};
 
@@ -17,10 +18,32 @@ use crate::{
 
 use super::{repository::RedeemRepository, Redeem, RedeemRepositoryError};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum RedeemError {
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
+
+pub struct RedeemMonitorParams<CC, CR, FE, SR, P, RR, W>
+where
+    CC: ChainClient,
+    CR: ChainRepository,
+    FE: FeeEstimator,
+    SR: SwapRepository,
+    P: PrivateKeyProvider,
+    RR: RedeemRepository,
+    W: Wallet,
+{
+    pub chain_client: Arc<CC>,
+    pub chain_repository: Arc<CR>,
+    pub fee_estimator: Arc<FE>,
+    pub poll_interval: Duration,
+    pub swap_repository: Arc<SR>,
+    pub swap_service: Arc<SwapService<P>>,
+    pub redeem_repository: Arc<RR>,
+    pub wallet: Arc<W>,
+}
+
 pub struct RedeemMonitor<CC, CR, FE, SR, P, RR, W>
 where
     CC: ChainClient,
@@ -51,25 +74,16 @@ where
     RR: RedeemRepository,
     W: Wallet,
 {
-    pub fn new(
-        chain_client: Arc<CC>,
-        chain_repository: Arc<CR>,
-        fee_estimator: Arc<FE>,
-        poll_interval: Duration,
-        swap_repository: Arc<SR>,
-        swap_service: Arc<SwapService<P>>,
-        redeem_repository: Arc<RR>,
-        wallet: Arc<W>,
-    ) -> Self {
+    pub fn new(params: RedeemMonitorParams<CC, CR, FE, SR, P, RR, W>) -> Self {
         Self {
-            chain_client,
-            chain_repository,
-            fee_estimator,
-            poll_interval,
-            swap_repository,
-            swap_service,
-            redeem_repository,
-            wallet,
+            chain_client: params.chain_client,
+            chain_repository: params.chain_repository,
+            fee_estimator: params.fee_estimator,
+            poll_interval: params.poll_interval,
+            swap_repository: params.swap_repository,
+            swap_service: params.swap_service,
+            redeem_repository: params.redeem_repository,
+            wallet: params.wallet,
         }
     }
 
@@ -197,7 +211,7 @@ where
 
 impl From<bitcoin::address::Error> for RedeemError {
     fn from(value: bitcoin::address::Error) -> Self {
-        todo!()
+        RedeemError::General(Box::new(value))
     }
 }
 
@@ -224,13 +238,13 @@ impl From<ChainError> for RedeemError {
 
 impl From<CreateRedeemTxError> for RedeemError {
     fn from(value: CreateRedeemTxError) -> Self {
-        todo!()
+        RedeemError::General(Box::new(value))
     }
 }
 
 impl From<FeeEstimateError> for RedeemError {
     fn from(value: FeeEstimateError) -> Self {
-        todo!()
+        RedeemError::General(Box::new(value))
     }
 }
 
@@ -242,12 +256,12 @@ impl From<GetSwapsError> for RedeemError {
 
 impl From<RedeemRepositoryError> for RedeemError {
     fn from(value: RedeemRepositoryError) -> Self {
-        todo!()
+        RedeemError::General(Box::new(value))
     }
 }
 
 impl From<WalletError> for RedeemError {
     fn from(value: WalletError) -> Self {
-        todo!()
+        RedeemError::General(Box::new(value))
     }
 }

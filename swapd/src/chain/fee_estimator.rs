@@ -1,11 +1,15 @@
+use thiserror::Error;
+
 #[derive(Debug)]
 pub struct FeeEstimate {
     pub sat_per_kw: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum FeeEstimateError {
+    #[error("unavailable")]
     Unavailable,
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 

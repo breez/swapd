@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::UNIX_EPOCH};
 
 use bitcoin::consensus::Encodable;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 use crate::redeem::{self, Redeem, RedeemRepositoryError};
 
