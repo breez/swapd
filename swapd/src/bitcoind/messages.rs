@@ -1,5 +1,10 @@
 use serde::Deserialize;
 
+#[derive(Deserialize)]
+pub struct EstimateSmartFeeResponse {
+    pub feerate: f64,
+}
+
 pub struct GetBestBlockHashResponse {
     pub hex: String,
 }

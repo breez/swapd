@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
-use chain::ChainMonitor;
+use chain::{ChainMonitor, FallbackFeeEstimator};
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
@@ -194,8 +194,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&chain_client),
         Arc::clone(&chain_filter_repository),
     ));
-    let fee_estimator = Arc::new(WhatTheFeeEstimator::new(args.lock_time));
-    fee_estimator.start().await?;
+    let fee_estimator_1 = WhatTheFeeEstimator::new(args.lock_time);
+    fee_estimator_1.start().await?;
+    let fee_estimator_2 = bitcoind::FeeEstimator::new(Arc::clone(&chain_client));
+    let fee_estimator = Arc::new(FallbackFeeEstimator::new(fee_estimator_1, fee_estimator_2));
     let swapper_server = SwapperServer::new(SwapServer::new(SwapServerParams {
         network: args.network,
         max_swap_amount_sat: args.max_swap_amount_sat,

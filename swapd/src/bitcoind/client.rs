@@ -8,15 +8,16 @@ use bitcoin::{
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, trace};
 
 use crate::chain::{BlockHeader, ChainClient, ChainError};
 
 use super::{
-    GetBestBlockHashResponse, GetBlockCountResponse, GetBlockHeaderResponse, GetBlockResponse,
-    GetRawTransactionResponse, RpcError, RpcRequest, RpcServerMessage, RpcServerMessageBody,
-    SendRawTransactionResponse,
+    EstimateSmartFeeResponse, GetBestBlockHashResponse, GetBlockCountResponse,
+    GetBlockHeaderResponse, GetBlockResponse, GetRawTransactionResponse, RpcError, RpcRequest,
+    RpcServerMessage, RpcServerMessageBody, SendRawTransactionResponse,
 };
 
 #[derive(Debug)]
@@ -28,10 +29,15 @@ pub struct BitcoindClient {
     network: Network,
 }
 
-#[derive(Debug)]
-enum CallError {
+#[derive(Debug, Error)]
+pub(super) enum CallError {
+    #[error("rpc error: {0:?}")]
     RpcError(RpcError),
+
+    #[error("deserialize error: {0}")]
     Deserialize(serde_json::error::Error),
+
+    #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
@@ -86,6 +92,24 @@ impl BitcoindClient {
             }
             RpcServerMessageBody::Error { id: _, error } => Err(CallError::RpcError(error)),
         }
+    }
+
+    pub(super) async fn estimatesmartfee(
+        &self,
+        conf_target: u32,
+    ) -> Result<EstimateSmartFeeResponse, CallError> {
+        Ok(
+            match self
+                .call(
+                    "estimatesmartfee",
+                    Value::Array(vec![Value::Number(conf_target.clamp(1, 1008).into())]),
+                )
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            },
+        )
     }
 
     async fn get_req_id(&self) -> u64 {
