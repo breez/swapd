@@ -12,11 +12,13 @@ use tonic::{
 };
 use tracing::{debug, error, instrument, warn};
 
-use crate::lightning::{LightningClient, PayError, PaymentRequest, PaymentResult};
+use crate::lightning::{
+    LightningClient, LightningError, PaymentRequest, PaymentResult, PreimageResult,
+};
 
 use super::cln_api::{
     listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus,
-    ListsendpaysRequest, PayRequest, WaitsendpayRequest,
+    ListpaysRequest, ListsendpaysRequest, PayRequest, WaitsendpayRequest,
 };
 
 pub struct ClientConnection {
@@ -64,7 +66,39 @@ impl Client {
 #[async_trait::async_trait]
 impl LightningClient for Client {
     #[instrument(level = "trace", skip(self))]
-    async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, PayError> {
+    async fn get_preimage(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<Option<PreimageResult>, LightningError> {
+        let mut client = self.get_client().await?;
+        let resp = client
+            .list_pays(Request::new(ListpaysRequest {
+                payment_hash: Some(hash.as_byte_array().to_vec()),
+                ..Default::default()
+            }))
+            .await?;
+
+        let result = match resp
+            .into_inner()
+            .pays
+            .into_iter()
+            .find(|pay| pay.preimage.is_some())
+        {
+            Some(payment) => Some(PreimageResult {
+                label: String::from(payment.label()),
+                preimage: payment.preimage.unwrap().try_into().map_err(|e| {
+                    warn!("failed to parse preimage from cln: {:?}", e);
+                    LightningError::InvalidPreimage
+                })?,
+            }),
+            None => None,
+        };
+
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, LightningError> {
         let mut client = self.get_client().await?;
 
         // TODO: Properly map the response here.
@@ -92,7 +126,7 @@ impl LightningClient for Client {
             PayStatus::Complete => {
                 let preimage = pay_resp.payment_preimage.try_into().map_err(|e| {
                     warn!("failed to parse preimage from cln: {:?}", e);
-                    PayError::InvalidPreimage
+                    LightningError::InvalidPreimage
                 })?;
                 PaymentResult::Success { preimage }
             }
@@ -127,7 +161,7 @@ impl LightningClient for Client {
 async fn wait_payment<'a>(
     client: &mut NodeClient<Channel>,
     payment_hash: sha256::Hash,
-) -> Result<Option<PaymentResult>, PayError> {
+) -> Result<Option<PaymentResult>, LightningError> {
     let mut client2 = client.clone();
     let completed_payments_fut = client.list_send_pays(Request::new(ListsendpaysRequest {
         payment_hash: Some(payment_hash.as_byte_array().to_vec()),
@@ -157,7 +191,9 @@ async fn wait_payment<'a>(
         .next()
     {
         return Ok(Some(PaymentResult::Success {
-            preimage: preimage.try_into().map_err(|_| PayError::InvalidPreimage)?,
+            preimage: preimage
+                .try_into()
+                .map_err(|_| LightningError::InvalidPreimage)?,
         }));
     }
 
@@ -181,23 +217,25 @@ async fn wait_payment<'a>(
             Ok(res) => {
                 if let Some(preimage) = res.into_inner().payment_preimage {
                     return Ok(Some(PaymentResult::Success {
-                        preimage: preimage.try_into().map_err(|_| PayError::InvalidPreimage)?,
+                        preimage: preimage
+                            .try_into()
+                            .map_err(|_| LightningError::InvalidPreimage)?,
                     }));
                 }
             }
             // TODO: Map these errors to correct error strings.
             Err(status) => match parse_cln_error(&status) {
                 Some(code) => match code {
-                    -1 => return Err(PayError::General(status)),
-                    200 => return Err(PayError::General(status)),
+                    -1 => return Err(LightningError::General(status)),
+                    200 => return Err(LightningError::General(status)),
                     202 => {}
                     203 => {}
                     204 => {}
                     208 => {}
                     209 => {}
-                    _ => return Err(PayError::General(status)),
+                    _ => return Err(LightningError::General(status)),
                 },
-                None => return Err(PayError::General(status)),
+                None => return Err(LightningError::General(status)),
             },
         }
     }
@@ -211,15 +249,15 @@ fn parse_cln_error(status: &Status) -> Option<i32> {
         .and_then(|caps| caps["code"].parse::<i32>().ok())
 }
 
-impl From<tonic::transport::Error> for PayError {
+impl From<tonic::transport::Error> for LightningError {
     fn from(_value: tonic::transport::Error) -> Self {
-        PayError::ConnectionFailed
+        LightningError::ConnectionFailed
     }
 }
 
-impl From<tonic::Status> for PayError {
+impl From<tonic::Status> for LightningError {
     fn from(_value: tonic::Status) -> Self {
-        PayError::ConnectionFailed
+        LightningError::ConnectionFailed
     }
 }
 
@@ -235,10 +273,10 @@ impl From<tonic::transport::Error> for GetClientError {
     }
 }
 
-impl From<GetClientError> for PayError {
+impl From<GetClientError> for LightningError {
     fn from(value: GetClientError) -> Self {
         match value {
-            GetClientError::ConnectionFailed(_) => PayError::ConnectionFailed,
+            GetClientError::ConnectionFailed(_) => LightningError::ConnectionFailed,
         }
     }
 }

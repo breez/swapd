@@ -7,7 +7,7 @@ use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
-use redeem::{RedeemMonitor, RedeemMonitorParams};
+use redeem::{PreimageMonitor, RedeemMonitor, RedeemMonitorParams};
 use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
@@ -135,6 +135,10 @@ struct Args {
     #[arg(long, default_value = "20")]
     pub redeem_poll_interval_seconds: u64,
 
+    /// Polling interval between checking for uncaught preimages.
+    #[arg(long, default_value = "60")]
+    pub preimage_poll_interval_seconds: u64,
+
     /// Automatically apply migrations to the database.
     #[arg(long)]
     pub auto_migrate: bool,
@@ -230,11 +234,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         redeem_repository: Arc::clone(&redeem_repository),
         wallet: Arc::clone(&cln_client),
     });
+    let preimage_monitor = PreimageMonitor::new(
+        Arc::clone(&chain_repository),
+        Arc::clone(&cln_client),
+        Duration::from_secs(args.preimage_poll_interval_seconds),
+        Arc::clone(&swap_repository),
+    );
 
     let server_token = token.clone();
     let internal_server_token = token.clone();
     let chain_monitor_token = token.clone();
     let redeem_monitor_token = token.clone();
+    let preimage_monitor_token = token.clone();
     let tracker = TaskTracker::new();
 
     tokio::spawn(async move {
@@ -259,6 +270,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => info!("redeem monitor exited with {:?}", e),
         };
         redeem_monitor_token.cancel();
+    });
+    tracker.spawn(async move {
+        info!("Starting preimage monitor");
+        let res = preimage_monitor
+            .start(async {
+                preimage_monitor_token.cancelled().await;
+                info!("preimage monitor shutting down");
+            })
+            .await;
+        match res {
+            Ok(_) => info!("preimage monitor exited"),
+            Err(e) => info!("preimage monitor exited with {:?}", e),
+        };
+        preimage_monitor_token.cancel();
     });
     tracker.spawn(async move {
         info!("Starting chain monitor");

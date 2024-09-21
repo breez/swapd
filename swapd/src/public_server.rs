@@ -17,7 +17,7 @@ use crate::{
         FeeEstimator, Utxo,
     },
     chain_filter::ChainFilterService,
-    lightning::{LightningClient, PayError, PaymentRequest},
+    lightning::{LightningClient, LightningError, PaymentRequest},
     public_server::swap_api::AddressStatus,
     swap::PaymentAttempt,
 };
@@ -530,8 +530,8 @@ impl From<FeeEstimateError> for Status {
     }
 }
 
-impl From<PayError> for Status {
-    fn from(value: PayError) -> Self {
+impl From<LightningError> for Status {
+    fn from(value: LightningError) -> Self {
         debug!("payment failed: {:?}", value);
         Status::unknown("payment failed")
     }
