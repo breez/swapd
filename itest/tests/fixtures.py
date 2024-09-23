@@ -69,7 +69,7 @@ def print_err_log(swapd):
 
 
 @pytest.fixture
-def postgres_factory(test_name):
+def postgres_factory(test_name, teardown_checks):
     pf = PostgresContainerFactory(test_name)
     yield pf
     errs = pf.killall()
