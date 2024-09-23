@@ -27,7 +27,36 @@ jobs:
 
       - name: Run Format check
         run: make fmt-check
-  
+
+  itest-grpc-check:
+    name: itest grpc check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install virtualenv
+        run: python -m pip install --user virtualenv
+
+      - name: Generate grpc bindings
+        run: |
+          make itest-gen-proto
+          make fmt-python
+
+      - name: Check git status
+        env: 
+          GIT_PAGER: cat
+        run: |
+          status=$(git status --porcelain)
+          if [[ -n "$status" ]]; then
+            echo "Git status has changes"
+            echo "$status"
+            git diff
+            exit 1
+          else
+            echo "No changes in git status"
+          fi
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
