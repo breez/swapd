@@ -12,9 +12,14 @@ from pyln.testing.utils import (
 from swap_pb2_grpc import SwapperStub
 from swap_internal_pb2_grpc import SwapManagerStub
 from pathlib import Path
+from flask import Flask, request
+from cheroot.wsgi import Server
+from cheroot.wsgi import PathInfoDispatcher
+import flask
 import swap_internal_pb2
 import swap_pb2
 
+import multiprocessing
 import grpc
 import logging
 import os
@@ -22,7 +27,7 @@ import threading
 
 SWAPD_CONFIG = OrderedDict(
     {
-        "log-level": "swapd=trace,sqlx::query=debug,info",
+        "log-level": "swapd=trace,sqlx::query=debug,reqwest=debug,info",
         "chain-poll-interval-seconds": "1",
         "redeem-poll-interval-seconds": "1",
         "preimage-poll-interval-seconds": "1",
@@ -39,6 +44,7 @@ class SwapD(TailableProc):
     def __init__(
         self,
         lightning_node,
+        whatthefee,
         node_grpc_port,
         process_dir,
         bitcoindproxy,
@@ -46,6 +52,7 @@ class SwapD(TailableProc):
         grpc_port=27103,
         internal_grpc_port=27104,
         swapd_id=0,
+        fees=[20, 40, 60, 80, 100],
     ):
         # We handle our own version of verbose, below.
         TailableProc.__init__(self, process_dir, verbose=True)
@@ -75,6 +82,9 @@ class SwapD(TailableProc):
             "cln-grpc-client-key": key_path.absolute().as_posix(),
             "db-url": db_url,
             "auto-migrate": None,
+            "whatthefee-url": "http://127.0.0.1:{}?fees={}".format(
+                whatthefee.port, "%2C".join(map(str, fees))
+            ),
         }
 
         for k, v in opts.items():
@@ -120,6 +130,7 @@ class SwapdServer(object):
         swapd_id,
         process_dir,
         bitcoind,
+        whatthefee,
         lightning_node,
         node_grpc_port,
         db_url,
@@ -127,10 +138,12 @@ class SwapdServer(object):
         grpc_port=None,
         internal_grpc_port=None,
         options=None,
+        fees=[20, 40, 60, 80, 100],
         **kwargs,
     ):
         self.bitcoind = bitcoind
         self.lightning_node = lightning_node
+        self.whatthefee = whatthefee
         self.may_fail = may_fail
         self.rc = 0
         self._create_grpc_rpc(grpc_port)
@@ -139,6 +152,7 @@ class SwapdServer(object):
 
         self.daemon = SwapD(
             lightning_node,
+            whatthefee,
             node_grpc_port,
             process_dir,
             bitcoind.get_proxy(),
@@ -146,6 +160,7 @@ class SwapdServer(object):
             grpc_port=grpc_port,
             internal_grpc_port=internal_grpc_port,
             swapd_id=swapd_id,
+            fees=fees,
         )
 
         if options is not None:
@@ -316,6 +331,7 @@ class SwapdFactory(object):
         testname,
         bitcoind,
         executor,
+        whatthefee,
         directory,
         node_factory,
         postgres_factory,
@@ -326,6 +342,7 @@ class SwapdFactory(object):
         self.instances = []
         self.reserved_ports = []
         self.executor = executor
+        self.whatthefee = whatthefee
         self.bitcoind = bitcoind
         self.directory = directory
         self.lock = threading.Lock()
@@ -347,6 +364,7 @@ class SwapdFactory(object):
         may_fail=False,
         expect_fail=False,
         cleandir=True,
+        fees=[20, 40, 60, 80, 100],
         **kwargs,
     ):
         grpc_port = self.get_unused_port()
@@ -361,6 +379,7 @@ class SwapdFactory(object):
             swapd_id,
             process_dir,
             self.bitcoind,
+            self.whatthefee,
             node,
             cln_grpc_port,
             postgres.connectionstring,
@@ -368,6 +387,7 @@ class SwapdFactory(object):
             grpc_port,
             internal_grpc_port,
             options,
+            fees,
         )
 
         self.instances.append(swapd)
@@ -402,3 +422,57 @@ class SwapdFactory(object):
             drop_unused_port(p)
 
         return not unexpected_fail, err_msgs
+
+
+class WhatTheFee(object):
+    def __init__(self, port=0):
+        self.app = Flask("WhatTheFee")
+        self.app.add_url_rule("/", "API entrypoint", self.get_fees, methods=["GET"])
+        self.port = port
+        self.request_count = 0
+
+    def get_fees(self):
+        self.request_count += 1
+        error = request.args.get("error")
+        if error is not None:
+            response = flask.Response(error)
+            response.headers["Content-Type"] = "text/plain"
+            response.status_code = 500
+            return response
+
+        fees = request.args.get("fees")
+        content = (
+            '{"index": [3, 6, 9, 12, 18, 24, 36, 48, 72, 96, 144], '
+            '"columns": ["0.0500", "0.2000", "0.5000", "0.8000", "0.9500"], '
+            '"data": ['
+        )
+        for i in range(10):
+            content += "[" + fees + "],"
+        content += "[" + fees + "]]}"
+        response = flask.Response(content)
+        response.headers["Content-Type"] = "application/json"
+        return response
+
+    def start(self):
+        d = PathInfoDispatcher({"/": self.app})
+        self.server = Server(("0.0.0.0", self.port), d)
+        self.proxy_thread = threading.Thread(target=self.server.start)
+        self.proxy_thread.daemon = True
+        self.proxy_thread.start()
+
+        # Now that the whatthefee api is running on the real rpcport, let's tell
+        # all future callers to talk to the proxyport. We use the bind_addr as a
+        # signal that the port is bound and accepting connections.
+        while self.server.bind_addr[1] == 0:
+            pass
+        self.port = self.server.bind_addr[1]
+        logging.debug("WhatTheFee api listening on port {}".format(self.port))
+
+    def stop(self):
+        self.server.stop()
+        self.proxy_thread.join()
+        logging.debug(
+            "WhatTheFee api shut down after processing {} requests".format(
+                self.request_count
+            )
+        )

@@ -14,6 +14,16 @@ import time
 import docker
 
 
+@pytest.fixture
+def whatthefee():
+    wtf = WhatTheFee()
+    wtf.start()
+
+    yield wtf
+
+    wtf.stop()
+
+
 def get_crash_log(swapd):
     if swapd.may_fail:
         return None, None
@@ -76,11 +86,13 @@ def swapd_factory(
     teardown_checks,
     node_factory,
     postgres_factory,
+    whatthefee,
 ):
     sf = SwapdFactory(
         test_name,
         bitcoind,
         executor,
+        whatthefee,
         directory=directory,
         node_factory=node_factory,
         postgres_factory=postgres_factory,

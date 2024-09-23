@@ -144,7 +144,8 @@ async fn get_fees(url: &Url) -> Result<LastResponse, Box<dyn std::error::Error>>
     let timestamp = now.duration_since(UNIX_EPOCH)?.as_secs();
     let cache_bust = (timestamp / 300) * 300;
     let mut url = url.clone();
-    url.set_query(Some(&format!("c={}", cache_bust)));
+    url.query_pairs_mut()
+        .append_pair("c", &cache_bust.to_string());
     let response = reqwest::get(url)
         .await?
         .json::<WhatTheFeeResponse>()
