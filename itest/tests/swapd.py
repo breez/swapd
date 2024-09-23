@@ -288,6 +288,10 @@ class SwapManagerGrpc(object):
         self.channel = grpc.insecure_channel(f"{host}:{port}")
         self.stub = SwapManagerStub(self.channel)
 
+    def add_address_filters(self, addresses=[]):
+        payload = swap_internal_pb2.AddAddressFiltersRequest(addresses=addresses)
+        return self.stub.AddAddressFilters(payload)
+
     def get_info(self):
         payload = swap_internal_pb2.GetInfoRequest()
         return self.stub.GetInfo(payload)
