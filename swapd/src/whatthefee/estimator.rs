@@ -3,6 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use reqwest::Url;
 use serde::Deserialize;
 use tokio::{sync::Mutex, time::MissedTickBehavior};
 use tracing::error;
@@ -26,20 +27,22 @@ struct LastResponse {
 
 #[derive(Debug)]
 pub struct WhatTheFeeEstimator {
+    url: Url,
     lock_time: u32,
     last_response: Arc<Mutex<Option<LastResponse>>>,
 }
 
 impl WhatTheFeeEstimator {
-    pub fn new(lock_time: u32) -> Self {
+    pub fn new(url: Url, lock_time: u32) -> Self {
         Self {
+            url,
             lock_time,
             last_response: Arc::new(Mutex::new(None)),
         }
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let fees = get_fees().await?;
+        let fees = get_fees(&self.url).await?;
         *self.last_response.lock().await = Some(fees);
         self.run_forever();
         Ok(())
@@ -47,12 +50,13 @@ impl WhatTheFeeEstimator {
 
     fn run_forever(&self) {
         let last_response = Arc::clone(&self.last_response);
+        let url = self.url.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;
-                let fees = match get_fees().await {
+                let fees = match get_fees(&url).await {
                     Ok(fees) => fees,
                     Err(e) => {
                         error!("failed to get fees: {:?}", e);
@@ -135,11 +139,13 @@ impl FeeEstimator for WhatTheFeeEstimator {
     }
 }
 
-async fn get_fees() -> Result<LastResponse, Box<dyn std::error::Error>> {
+async fn get_fees(url: &Url) -> Result<LastResponse, Box<dyn std::error::Error>> {
     let now = SystemTime::now();
     let timestamp = now.duration_since(UNIX_EPOCH)?.as_secs();
     let cache_bust = (timestamp / 300) * 300;
-    let response = reqwest::get(format!("https://whatthefee.io/data.json?c={}", cache_bust))
+    let mut url = url.clone();
+    url.set_query(Some(&format!("c={}", cache_bust)));
+    let response = reqwest::get(url)
         .await?
         .json::<WhatTheFeeResponse>()
         .await?;

@@ -8,6 +8,7 @@ use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use redeem::{PreimageMonitor, RedeemMonitor, RedeemMonitorParams};
+use reqwest::Url;
 use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
@@ -142,6 +143,10 @@ struct Args {
     /// Automatically apply migrations to the database.
     #[arg(long)]
     pub auto_migrate: bool,
+
+    /// Url to whatthefee.io.
+    #[arg(long, default_value = "https://whatthefee.io/data.json")]
+    pub whatthefee_url: Url,
 }
 
 #[tokio::main]
@@ -197,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&chain_client),
         Arc::clone(&chain_filter_repository),
     ));
-    let fee_estimator_1 = WhatTheFeeEstimator::new(args.lock_time);
+    let fee_estimator_1 = WhatTheFeeEstimator::new(args.whatthefee_url, args.lock_time);
     fee_estimator_1.start().await?;
     let fee_estimator_2 = bitcoind::FeeEstimator::new(Arc::clone(&chain_client));
     let fee_estimator = Arc::new(FallbackFeeEstimator::new(fee_estimator_1, fee_estimator_2));
