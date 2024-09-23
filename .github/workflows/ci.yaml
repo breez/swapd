@@ -1,0 +1,195 @@
+name: Continuous Integration
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+     
+      - name: Install rust
+        run: |
+          rustup set auto-self-update disable
+          rustup toolchain install stable --profile minimal
+
+      - name: Install virtualenv
+        run: python -m pip install --user virtualenv
+
+      - name: Run Format check
+        run: make fmt-check
+  
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rust
+        run: |
+          rustup set auto-self-update disable
+          rustup toolchain install stable --profile minimal
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: clippy
+        run: make clippy
+  
+  compile-cln:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cln:
+          - version: v24.08
+            rust-version: stable
+            org: ElementsProject
+            repo: lightning
+          - version: v24.05
+            rust-version: 1.79.0
+            org: ElementsProject
+            repo: lightning
+          - version: v24.02.2
+            rust-version: 1.79.0
+            org: ElementsProject
+            repo: lightning
+          - version: v23.11.2
+            rust-version: 1.79.0
+            org: ElementsProject
+            repo: lightning
+    steps:
+      - name: Cache CLN
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: inst
+          key: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.cln.version}}
+
+      - name: Checkout
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.cln.org }}/${{ matrix.cln.repo }}
+          ref: ${{ matrix.cln.version }}
+      
+      - name: Install dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y libffi-dev zlib1g-dev libsodium-dev gettext
+
+      - name: Set up Python 3.8
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.8
+
+      - name: Install rust
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          rustup set auto-self-update disable
+          rustup install ${{ matrix.cln.rust-version }}
+          rustup default ${{ matrix.cln.rust-version }}
+
+      - name: Install Protoc
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "27.4"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          pip3 install --user pip wheel poetry
+          poetry export -o requirements.txt --with dev --without-hashes
+          python3 -m pip install -r requirements.txt
+          ./configure --enable-rust
+          make -j $(nproc)
+          mkdir inst
+          make install DESTDIR=inst/
+
+      - uses: actions/upload-artifact@v4
+        name: Upload cln artifact
+        with:
+          name: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.cln.version}}
+          path: inst
+
+  itest:
+    name: Integration tests
+    needs: compile-cln
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cln-version:
+          - v24.08
+          - v24.05
+          - v24.02.2
+          - v23.11.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rust
+        run: |
+          rustup set auto-self-update disable
+          rustup toolchain install stable --profile minimal
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install bitcoind
+        run: |
+          wget -q "https://bitcoincore.org/bin/bitcoin-core-26.1/bitcoin-26.1-x86_64-linux-gnu.tar.gz"
+          tar -xzf "bitcoin-26.1-x86_64-linux-gnu.tar.gz"
+          sudo cp -r "bitcoin-26.1/bin" "/usr/local"
+          rm -rf "bitcoin-26.1-x86_64-linux-gnu.tar.gz" "bitcoin-26.1"
+
+      - name: Download cln artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.cln-version}}
+          path: inst
+
+      - name: Install CLN
+        run: |
+          chmod +x -R inst/
+          sudo cp -a inst/usr/local/. /usr/local/
+
+      - name: Install virtualenv
+        run: python -m pip install --user virtualenv
+
+      - name: Integration tests
+        env:
+          TEST_DEBUG: 1
+          SLOW_MACHINE: 1
+          PYTEST_PAR: 10
+        run: make itest
+  
+  utest:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rust
+        run: |
+          rustup set auto-self-update disable
+          rustup toolchain install stable --profile minimal
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Unit tests
+        run: make utest
