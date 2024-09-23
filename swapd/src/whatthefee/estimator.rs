@@ -1,10 +1,11 @@
 use std::{
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
 };
 
 use reqwest::Url;
 use serde::Deserialize;
+use thiserror::Error;
 use tokio::{sync::Mutex, time::MissedTickBehavior};
 use tracing::error;
 
@@ -32,6 +33,12 @@ pub struct WhatTheFeeEstimator {
     last_response: Arc<Mutex<Option<LastResponse>>>,
 }
 
+#[derive(Debug, Error)]
+pub enum WhatTheFeeError {
+    #[error("whatthefee: {0}")]
+    General(Box<dyn std::error::Error>),
+}
+
 impl WhatTheFeeEstimator {
     pub fn new(url: Url, lock_time: u32) -> Self {
         Self {
@@ -41,7 +48,7 @@ impl WhatTheFeeEstimator {
         }
     }
 
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(&self) -> Result<(), WhatTheFeeError> {
         let fees = get_fees(&self.url).await?;
         *self.last_response.lock().await = Some(fees);
         self.run_forever();
@@ -139,7 +146,7 @@ impl FeeEstimator for WhatTheFeeEstimator {
     }
 }
 
-async fn get_fees(url: &Url) -> Result<LastResponse, Box<dyn std::error::Error>> {
+async fn get_fees(url: &Url) -> Result<LastResponse, WhatTheFeeError> {
     let now = SystemTime::now();
     let timestamp = now.duration_since(UNIX_EPOCH)?.as_secs();
     let cache_bust = (timestamp / 300) * 300;
@@ -154,4 +161,16 @@ async fn get_fees(url: &Url) -> Result<LastResponse, Box<dyn std::error::Error>>
         response,
         timestamp: now,
     })
+}
+
+impl From<reqwest::Error> for WhatTheFeeError {
+    fn from(value: reqwest::Error) -> Self {
+        WhatTheFeeError::General(Box::new(value))
+    }
+}
+
+impl From<SystemTimeError> for WhatTheFeeError {
+    fn from(value: SystemTimeError) -> Self {
+        WhatTheFeeError::General(Box::new(value))
+    }
 }

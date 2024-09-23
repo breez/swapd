@@ -180,7 +180,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         identity: cln_identity,
     };
     let cln_client = Arc::new(cln::Client::new(cln_conn, args.network));
-    let pgpool = Arc::new(PgPool::connect(&args.db_url).await?);
+    let pgpool = Arc::new(
+        PgPool::connect(&args.db_url)
+            .await
+            .map_err(|e| format!("failed to connect to postgres: {:?}", e))?,
+    );
     if args.auto_migrate {
         postgresql::migrate(&pgpool).await?;
     }
