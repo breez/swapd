@@ -73,6 +73,10 @@ pub enum CreateRedeemTxError {
     InvalidMessage,
     #[error("invalid secret key")]
     InvalidSecretKey,
+    #[error("invalid signature")]
+    InvalidSignature,
+    #[error("not enough memory")]
+    NotEnoughMemory,
     #[error("amount too low")]
     AmountTooLow,
 }
@@ -249,17 +253,17 @@ impl From<bitcoin::secp256k1::Error> for CreateRedeemTxError {
     fn from(value: bitcoin::secp256k1::Error) -> Self {
         trace!(secp256k1_error = field::debug(value));
         match value {
-            bitcoin::secp256k1::Error::IncorrectSignature => todo!(),
+            bitcoin::secp256k1::Error::IncorrectSignature => CreateRedeemTxError::InvalidSignature,
             bitcoin::secp256k1::Error::InvalidMessage => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidPublicKey => todo!(),
-            bitcoin::secp256k1::Error::InvalidSignature => todo!(),
-            bitcoin::secp256k1::Error::InvalidSecretKey => todo!(),
+            bitcoin::secp256k1::Error::InvalidPublicKey => CreateRedeemTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidSignature => CreateRedeemTxError::InvalidSignature,
+            bitcoin::secp256k1::Error::InvalidSecretKey => CreateRedeemTxError::InvalidSecretKey,
             bitcoin::secp256k1::Error::InvalidSharedSecret => CreateRedeemTxError::InvalidSecretKey,
-            bitcoin::secp256k1::Error::InvalidRecoveryId => todo!(),
-            bitcoin::secp256k1::Error::InvalidTweak => todo!(),
-            bitcoin::secp256k1::Error::NotEnoughMemory => todo!(),
-            bitcoin::secp256k1::Error::InvalidPublicKeySum => todo!(),
-            bitcoin::secp256k1::Error::InvalidParityValue(_) => todo!(),
+            bitcoin::secp256k1::Error::InvalidRecoveryId => CreateRedeemTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidTweak => CreateRedeemTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::NotEnoughMemory => CreateRedeemTxError::NotEnoughMemory,
+            bitcoin::secp256k1::Error::InvalidPublicKeySum => CreateRedeemTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidParityValue(_) => CreateRedeemTxError::InvalidMessage,
         }
     }
 }

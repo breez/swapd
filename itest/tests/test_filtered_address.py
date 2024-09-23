@@ -31,7 +31,7 @@ def test_filtered_address(node_factory, swapd_factory):
         )
     )
     user_address = user.rpc.newaddr()["bech32"]
-    # create 2 utxos, because the first will be needed as reserve 
+    # create 2 utxos, because the first will be needed as reserve
     user_address, user_txid = user.fundwallet(200_000)
     swapper.internal_rpc.add_address_filters([user_address])
 

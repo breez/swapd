@@ -101,7 +101,6 @@ impl LightningClient for Client {
     async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, LightningError> {
         let mut client = self.get_client().await?;
 
-        // TODO: Properly map the response here.
         let pay_resp = match client
             .pay(Request::new(PayRequest {
                 label: Some(request.label),

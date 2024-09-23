@@ -164,8 +164,6 @@ where
         utxos: Vec<Utxo>,
         current_height: u64,
     ) -> Result<(), RedeemError> {
-        // TODO: It is perhaps better to save the utxos we tried to redeem in a transaction.
-        //       That way we avoid pinning ourselves due to RBF'ing with potentially different input sets.
         let utxos: Vec<_> = match self
             .swap_repository
             .get_paid_outpoints(&swap.public.hash)
@@ -218,6 +216,9 @@ where
             // if the previous fee rate is still sufficient and it spends the
             // same utxos, attempt to rebroadcast the tx and return. Utxos can
             // be different, for example if there has been a reorg in the meantime.
+            // Note that until cluster mempool is available, creating transactions
+            // with different input sets could lead to pinning ourselves. This
+            // should not happen most of the time, but it is a possibility.
             let sorted_new: Vec<_> = utxos.iter().map(|utxo| utxo.outpoint).collect();
             let sorted_old: Vec<_> = last_redeem
                 .tx

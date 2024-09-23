@@ -8,7 +8,7 @@ CREATE TABLE swaps (
     creation_time BIGINT NOT NULL,
     payer_pubkey BYTEA NOT NULL,
     swapper_pubkey BYTEA NOT NULL,
-    script BYTEA NOT NULL, -- TODO: remove?
+    script BYTEA NOT NULL,
     address VARCHAR NOT NULL,
     lock_time BIGINT NOT NULL,
     swapper_privkey BYTEA NOT NULL, -- TODO: encrypt?
