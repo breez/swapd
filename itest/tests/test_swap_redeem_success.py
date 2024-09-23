@@ -57,9 +57,7 @@ def test_swap_redeem_success(node_factory, swapd_factory):
         == "paid"
     )
 
-    wait_for(
-        lambda: swapper.lightning_node.bitcoin.rpc.getmempoolinfo()['size'] == 1
-    )
+    wait_for(lambda: swapper.lightning_node.bitcoin.rpc.getmempoolinfo()["size"] == 1)
     swapper.lightning_node.bitcoin.generate_block(1)
     wait_for(
         lambda: len(swapper.lightning_node.rpc.listfunds()["outputs"])
