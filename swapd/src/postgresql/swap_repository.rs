@@ -112,6 +112,8 @@ impl crate::swap::SwapRepository for SwapRepository {
         .bind(&output_indices)
         .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -130,14 +132,14 @@ impl crate::swap::SwapRepository for SwapRepository {
                     .execute(&*self.pool)
                     .await?;
 
-                sqlx::query(r#"UPDATE payment_attempts SET success = 1 WHERE label = $1"#)
+                sqlx::query(r#"UPDATE payment_attempts SET success = true WHERE label = $1"#)
                     .bind(label)
                     .execute(&*self.pool)
                     .await?;
             }
             PaymentResult::Failure { error } => {
                 sqlx::query(
-                    r#"UPDATE payment_attempts SET success = 0, error = $1 WHERE label = $2"#,
+                    r#"UPDATE payment_attempts SET success = false, error = $1 WHERE label = $2"#,
                 )
                 .bind(error)
                 .bind(label)
@@ -360,7 +362,7 @@ impl crate::swap::SwapRepository for SwapRepository {
                FROM swaps s
                INNER JOIN payment_attempts pa ON s.payment_hash = pa.swap_payment_hash
                INNER JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
-               WHERE pa.success = 1"#,
+               WHERE pa.success = true"#,
         )
         .bind(hash.as_byte_array().to_vec())
         .fetch(&*self.pool);

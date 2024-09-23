@@ -22,9 +22,10 @@ import threading
 
 SWAPD_CONFIG = OrderedDict(
     {
-        "log-level": "swapd=debug,info",
+        "log-level": "swapd=trace,sqlx::query=debug,info",
         "chain-poll-interval-seconds": "1",
         "redeem-poll-interval-seconds": "1",
+        "preimage-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
         "lock-time": "288",
         "min-confirmations": "1",

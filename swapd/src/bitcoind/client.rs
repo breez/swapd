@@ -10,9 +10,9 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use tracing::{debug, trace};
+use tracing::trace;
 
-use crate::chain::{BlockHeader, ChainClient, ChainError};
+use crate::chain::{BlockHeader, BroadcastError, ChainClient, ChainError};
 
 use super::{
     EstimateSmartFeeResponse, GetBestBlockHashResponse, GetBlockCountResponse,
@@ -205,9 +205,9 @@ impl BitcoindClient {
 
 #[async_trait::async_trait]
 impl ChainClient for BitcoindClient {
-    async fn broadcast_tx(&self, tx: Transaction) -> Result<(), ChainError> {
+    async fn broadcast_tx(&self, tx: Transaction) -> Result<(), BroadcastError> {
         let hex = serialize_hex(&tx);
-        debug!(tx = hex, "broadcasting tx");
+        trace!(tx = hex, "broadcasting tx");
         self.sendrawtransaction(hex).await?;
         Ok(())
     }
@@ -275,6 +275,21 @@ impl From<CallError> for ChainError {
             CallError::RpcError(e) => ChainError::General(e.message.into()),
             CallError::Deserialize(e) => ChainError::General(Box::new(e)),
             CallError::General(e) => ChainError::General(e),
+        }
+    }
+}
+
+impl From<CallError> for BroadcastError {
+    fn from(value: CallError) -> Self {
+        match value {
+            CallError::RpcError(rpc_error) => match &rpc_error.message {
+                x if x.contains("insufficient fee, rejecting replacement") => {
+                    BroadcastError::InsufficientFeeRejectingReplacement(rpc_error.message)
+                }
+                _ => BroadcastError::UnknownError(rpc_error.message),
+            },
+            CallError::Deserialize(_) => BroadcastError::Chain(value.into()),
+            CallError::General(_) => BroadcastError::Chain(value.into()),
         }
     }
 }

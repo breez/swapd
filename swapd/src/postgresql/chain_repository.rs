@@ -161,7 +161,8 @@ impl chain::ChainRepository for ChainRepository {
                              WHERE o.tx_id = i.tx_id)
                    OR EXISTS (SELECT 1
                               FROM tx_inputs i
-                              WHERE i.spending_tx_id = i.tx_id)"#,
+                              WHERE i.spending_tx_id = i.tx_id)
+               ON CONFLICT DO NOTHING"#,
         )
         .bind(&txns)
         .bind(&block_hashes)

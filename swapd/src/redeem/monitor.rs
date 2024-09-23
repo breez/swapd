@@ -5,9 +5,9 @@ use futures::future::{FusedFuture, FutureExt};
 use futures::{stream::FuturesUnordered, StreamExt};
 use thiserror::Error;
 use tokio::join;
-use tracing::{debug, error, field, instrument, warn};
+use tracing::{debug, error, field, instrument, trace, warn};
 
-use crate::chain::Utxo;
+use crate::chain::{BroadcastError, Utxo};
 use crate::swap::Swap;
 use crate::{
     chain::{
@@ -228,7 +228,23 @@ where
             if last_redeem.fee_per_kw + MIN_REPLACEMENT_DIFF_SAT_PER_KW > fee_estimate.sat_per_kw
                 && sorted_new == sorted_old
             {
-                self.chain_client.broadcast_tx(last_redeem.tx).await?;
+                debug!(
+                    fee_per_kw = last_redeem.fee_per_kw,
+                    hash = field::display(swap.public.hash),
+                    tx_id = field::display(last_redeem.tx.txid()),
+                    "rebroadcasting redeem tx"
+                );
+                if let Err(e) = self.chain_client.broadcast_tx(last_redeem.tx).await {
+                    match e {
+                        crate::chain::BroadcastError::InsufficientFeeRejectingReplacement(e) => {
+                            trace!(
+                                "got expected error for rebroadcast: 'insufficient fee, rejecting replacement {}'",
+                                e
+                            )
+                        }
+                        _ => return Err(e.into()),
+                    }
+                }
                 return Ok(());
             }
 
@@ -255,6 +271,12 @@ where
                 swap_hash: swap.public.hash,
             })
             .await?;
+        debug!(
+            fee_per_kw = fee_estimate.sat_per_kw,
+            hash = field::display(swap.public.hash),
+            tx_id = field::display(redeem_tx.txid()),
+            "broadcasting new redeem tx"
+        );
         self.chain_client.broadcast_tx(redeem_tx).await?;
         Ok(())
     }
@@ -284,6 +306,12 @@ impl From<ChainError> for RedeemError {
             ChainError::InvalidChain => RedeemError::General(Box::new(value)),
             ChainError::BlockNotFound => RedeemError::General(Box::new(value)),
         }
+    }
+}
+
+impl From<BroadcastError> for RedeemError {
+    fn from(value: BroadcastError) -> Self {
+        RedeemError::General(Box::new(value))
     }
 }
 

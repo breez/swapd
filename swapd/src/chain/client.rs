@@ -4,6 +4,16 @@ use thiserror::Error;
 use super::ChainRepositoryError;
 
 #[derive(Debug, Error)]
+pub enum BroadcastError {
+    #[error("{0}")]
+    Chain(ChainError),
+    #[error("insufficient fee, rejecting replacement {0}")]
+    InsufficientFeeRejectingReplacement(String),
+    #[error("unknown error: {0}")]
+    UnknownError(String),
+}
+
+#[derive(Debug, Error)]
 pub enum ChainError {
     #[error("{0}")]
     Database(ChainRepositoryError),
@@ -19,7 +29,7 @@ pub enum ChainError {
 
 #[async_trait::async_trait]
 pub trait ChainClient {
-    async fn broadcast_tx(&self, tx: Transaction) -> Result<(), ChainError>;
+    async fn broadcast_tx(&self, tx: Transaction) -> Result<(), BroadcastError>;
     async fn get_blockheight(&self) -> Result<u64, ChainError>;
     async fn get_tip_hash(&self) -> Result<BlockHash, ChainError>;
     async fn get_block(&self, hash: &BlockHash) -> Result<Block, ChainError>;

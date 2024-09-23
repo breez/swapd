@@ -203,9 +203,9 @@ where
         }
         tx.output[0].value = value_after_fees_sat;
 
-        let mut sighasher = sighash::SighashCache::new(&tx);
         let mut inputs = Vec::new();
         for (n, utxo) in utxos.iter().enumerate() {
+            let mut sighasher = sighash::SighashCache::new(&tx);
             let sighash = sighasher.segwit_signature_hash(
                 n,
                 &swap.public.script,
@@ -214,11 +214,12 @@ where
             )?;
             let msg = Message::from(sighash);
             let secret_key = SecretKey::from_slice(&swap.private.swapper_privkey.to_bytes())?;
-            let signature = self
+            let mut signature = self
                 .secp
                 .sign_ecdsa(&msg, &secret_key)
                 .serialize_der()
                 .to_vec();
+            signature.push(EcdsaSighashType::All as u8);
             let witness = vec![signature, preimage.to_vec(), swap.public.script.to_bytes()];
             let mut input = tx.input[n].clone();
             input.witness = witness.into();

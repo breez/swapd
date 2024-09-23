@@ -67,11 +67,10 @@ class PostgresContainerFactory(object):
     def get_container(self):
         port = reserve_unused_port()
         client = docker.from_env()
-        db_name = "swapd-test-postgres"
         container = client.containers.run(
             image="postgres:16",
             auto_remove=True,
-            name=db_name,
+            name="swapd-test-{}".format(self.testname),
             ports={f"5432/tcp": port},
             environment={"POSTGRES_PASSWORD": "POSTGRES_PASSWORD"},
             detach=True,
@@ -79,7 +78,7 @@ class PostgresContainerFactory(object):
         )
 
         self.reserved_ports.append(port)
-        postgres_container = PostgresContainer(container, port, db_name)
+        postgres_container = PostgresContainer(container, port, "swapd")
         self.containers.append(postgres_container)
         return postgres_container
 

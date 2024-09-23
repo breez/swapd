@@ -76,6 +76,7 @@ CREATE INDEX tx_outputs_address_idx ON tx_outputs(address);
 CREATE TABLE tx_blocks (
     tx_id VARCHAR NOT NULL,
     block_hash VARCHAR NOT NULL,
+    PRIMARY KEY (tx_id, block_hash),
     FOREIGN KEY (block_hash) REFERENCES blocks (block_hash) ON DELETE CASCADE
 );
 
