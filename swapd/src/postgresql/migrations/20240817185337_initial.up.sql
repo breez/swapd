@@ -109,8 +109,11 @@ CREATE TABLE redeems (
     creation_time BIGINT NOT NULL,
     tx bytea NOT NULL,
     destination_address VARCHAR NOT NULL,
-    fee_per_kw BIGINT NOT NULL
+    fee_per_kw BIGINT NOT NULL,
+    swap_hash BYTEA NOT NULL
 );
+
+CREATE INDEX redeems_swap_hash_creation_time ON redeems(swap_hash, creation_time);
 
 CREATE TABLE redeem_inputs (
     redeem_tx_id VARCHAR NOT NULL REFERENCES redeems,

@@ -128,11 +128,11 @@ struct Args {
     pub bitcoind_rpc_password: String,
 
     /// Polling interval between chain syncs.
-    #[arg(long, default_value = "20")]
+    #[arg(long, default_value = "60")]
     pub chain_poll_interval_seconds: u64,
 
     /// Polling interval between redeem runs.
-    #[arg(long, default_value = "20")]
+    #[arg(long, default_value = "60")]
     pub redeem_poll_interval_seconds: u64,
 
     /// Polling interval between checking for uncaught preimages.
@@ -189,7 +189,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let chain_filter_repository =
         Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
-    let redeem_repository = Arc::new(postgresql::RedeemRepository::new(Arc::clone(&pgpool)));
+    let redeem_repository = Arc::new(postgresql::RedeemRepository::new(
+        Arc::clone(&pgpool),
+        args.network,
+    ));
     let chain_filter = Arc::new(ChainFilterImpl::new(
         Arc::clone(&chain_client),
         Arc::clone(&chain_filter_repository),

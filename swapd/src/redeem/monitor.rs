@@ -5,7 +5,7 @@ use futures::future::{FusedFuture, FutureExt};
 use futures::{stream::FuturesUnordered, StreamExt};
 use thiserror::Error;
 use tokio::join;
-use tracing::{debug, error, field, warn};
+use tracing::{debug, error, field, instrument, warn};
 
 use crate::chain::Utxo;
 use crate::swap::Swap;
@@ -19,6 +19,8 @@ use crate::{
 };
 
 use super::{repository::RedeemRepository, Redeem, RedeemRepositoryError};
+
+const MIN_REPLACEMENT_DIFF_SAT_PER_KW: u32 = 250;
 
 #[derive(Debug, Error)]
 pub enum RedeemError {
@@ -89,9 +91,6 @@ where
         }
     }
 
-    // TODO: use the stop signal
-    // TODO: add intervals to the loop
-    // TODO: add proper error handling
     pub async fn start<F: Future<Output = ()>>(&self, signal: F) -> Result<(), RedeemError> {
         let mut sig = pin!(signal.fuse());
         if sig.is_terminated() {
@@ -117,6 +116,7 @@ where
         Ok(())
     }
 
+    #[instrument(skip(self), level = "trace")]
     async fn do_sync(&self) -> Result<(), RedeemError> {
         let utxos = self.chain_repository.get_utxos().await?;
         let addresses: Vec<_> = utxos.iter().map(|u| u.address.clone()).collect();
@@ -148,7 +148,7 @@ where
 
         while let Some(result) = tasks.next().await {
             if let Err(e) = result {
-                // TODO: Log which task it was.
+                // TODO: Log which task it was somehow.
                 error!("redeem task errored with: {:?}", e);
             }
         }
@@ -156,6 +156,7 @@ where
         Ok(())
     }
 
+    #[instrument(skip(self), level = "trace")]
     async fn redeem_swap(
         &self,
         swap: Swap,
@@ -163,7 +164,6 @@ where
         utxos: Vec<Utxo>,
         current_height: u64,
     ) -> Result<(), RedeemError> {
-        // TODO: Remove any outpoints that no longer exist in the utxos list.
         // TODO: It is perhaps better to save the utxos we tried to redeem in a transaction.
         //       That way we avoid pinning ourselves due to RBF'ing with potentially different input sets.
         let utxos: Vec<_> = match self
@@ -206,14 +206,38 @@ where
 
         // NOTE: This unwrap only works because the utxos vec is not empty!
         let min_conf_height = utxos.iter().map(|u| u.block_height).min().unwrap();
+
+        // Blocks left gives a sense of urgency for this redeem.
         let blocks_left = (swap.public.lock_time as i32)
             - (current_height.saturating_sub(min_conf_height) as i32);
         let fee_estimate_fut = self.fee_estimator.estimate_fee(blocks_left);
-        let address_fut = self.wallet.new_address();
-        let (fee_estimate_res, address_res) = join!(fee_estimate_fut, address_fut);
+        let last_redeem_fut = self.redeem_repository.get_last_redeem(&swap.public.hash);
+        let (fee_estimate_res, last_redeem_res) = join!(fee_estimate_fut, last_redeem_fut);
         let fee_estimate = fee_estimate_res?;
-        let destination_address = address_res?;
-        // TODO: Rebroadcast the old tx if the fee is sufficient.
+        let destination_address = if let Some(last_redeem) = last_redeem_res? {
+            // if the previous fee rate is still sufficient and it spends the
+            // same utxos, attempt to rebroadcast the tx and return. Utxos can
+            // be different, for example if there has been a reorg in the meantime.
+            let sorted_new: Vec<_> = utxos.iter().map(|utxo| utxo.outpoint).collect();
+            let sorted_old: Vec<_> = last_redeem
+                .tx
+                .input
+                .iter()
+                .map(|input| input.previous_output)
+                .collect();
+            if last_redeem.fee_per_kw + MIN_REPLACEMENT_DIFF_SAT_PER_KW > fee_estimate.sat_per_kw
+                && sorted_new == sorted_old
+            {
+                self.chain_client.broadcast_tx(last_redeem.tx).await?;
+                return Ok(());
+            }
+
+            // If not, replace with the same destination address.
+            last_redeem.destination_address
+        } else {
+            self.wallet.new_address().await?
+        };
+
         let redeem_tx = self.swap_service.create_redeem_tx(
             &swap,
             &utxos,
@@ -228,6 +252,7 @@ where
                 destination_address,
                 fee_per_kw: fee_estimate.sat_per_kw,
                 tx: redeem_tx.clone(),
+                swap_hash: swap.public.hash,
             })
             .await?;
         self.chain_client.broadcast_tx(redeem_tx).await?;
