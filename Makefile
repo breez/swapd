@@ -43,8 +43,12 @@ clean-test:
 clean-rust:
 	rm -rf target
 
-clippy:
+clippy: clippy-main clippy-tests
+
+clippy-main:
 	cargo clippy -- $(CLIPPY_OPTS)
+
+clippy-tests:
 	cargo clippy --tests -- $(CLIPPY_OPTS)
 
 fmt: fmt-python fmt-rust
