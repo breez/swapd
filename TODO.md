@@ -12,3 +12,5 @@
   - list-swaps --payment-hash
   - list-swaps --destination
 - [ ] let chainservice monitor redeem transactions
+- [ ] ensure chain is syncing before accepting payments
+- [ ] ensure redeem is working before accepting payments

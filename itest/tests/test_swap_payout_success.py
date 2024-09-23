@@ -19,7 +19,7 @@ import hashlib
 import os
 
 
-def test_swap_success(node_factory, swapd_factory):
+def test_swap_payout_success(node_factory, swapd_factory):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
     swapper.lightning_node.openchannel(user, 1000000)
