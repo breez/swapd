@@ -111,7 +111,7 @@ impl redeem::RedeemRepository for RedeemRepository {
                 .parse::<Address<NetworkUnchecked>>()?
                 .require_network(self.network)?,
             fee_per_kw: fee_per_kw as u32,
-            swap_hash: swap_hash.clone(),
+            swap_hash: *swap_hash,
             tx: Transaction::consensus_decode(&mut tx)?,
         }))
     }
