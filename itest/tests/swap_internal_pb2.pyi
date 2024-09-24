@@ -72,6 +72,46 @@ class SwapOutput(_message.Message):
         self, outpoint: _Optional[str] = ..., confirmation_height: _Optional[int] = ...
     ) -> None: ...
 
+class ListRedeemableRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListRedeemableReply(_message.Message):
+    __slots__ = ("redeemables",)
+    REDEEMABLES_FIELD_NUMBER: _ClassVar[int]
+    redeemables: _containers.RepeatedCompositeFieldContainer[Redeemable]
+    def __init__(
+        self, redeemables: _Optional[_Iterable[_Union[Redeemable, _Mapping]]] = ...
+    ) -> None: ...
+
+class Redeemable(_message.Message):
+    __slots__ = ("blocks_left", "swap_hash", "lock_time", "utxos")
+    BLOCKS_LEFT_FIELD_NUMBER: _ClassVar[int]
+    SWAP_HASH_FIELD_NUMBER: _ClassVar[int]
+    LOCK_TIME_FIELD_NUMBER: _ClassVar[int]
+    UTXOS_FIELD_NUMBER: _ClassVar[int]
+    blocks_left: int
+    swap_hash: str
+    lock_time: int
+    utxos: _containers.RepeatedCompositeFieldContainer[RedeemableUtxo]
+    def __init__(
+        self,
+        blocks_left: _Optional[int] = ...,
+        swap_hash: _Optional[str] = ...,
+        lock_time: _Optional[int] = ...,
+        utxos: _Optional[_Iterable[_Union[RedeemableUtxo, _Mapping]]] = ...,
+    ) -> None: ...
+
+class RedeemableUtxo(_message.Message):
+    __slots__ = ("outpoint", "confirmation_height")
+    OUTPOINT_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    outpoint: str
+    confirmation_height: int
+    def __init__(
+        self, outpoint: _Optional[str] = ..., confirmation_height: _Optional[int] = ...
+    ) -> None: ...
+
 class StopRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
