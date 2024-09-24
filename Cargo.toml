@@ -8,6 +8,8 @@ members = [
 [workspace.dependencies]
 clap = { version = "4.5.8", features = ["derive"] }
 prost = "0.13.1"
+serde = "1.0.207"
+serde_json = "1.0.127"
 tokio = { version = "1.39.2" }
 tonic = "0.12.1"
 tonic-build = "0.12.1"

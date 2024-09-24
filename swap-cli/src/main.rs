@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use internal_swap_api::{swap_manager_client::SwapManagerClient, AddAddressFiltersRequest};
+use internal_swap_api::{swap_manager_client::SwapManagerClient, AddAddressFiltersRequest, ListRedeemableRequest};
 use tonic::{transport::Uri, Request};
 
 mod internal_swap_api {
@@ -29,6 +29,7 @@ enum Command {
         #[command(subcommand)]
         command: AddressFiltersCommand,
     },
+    ListRedeemable
 }
 
 #[derive(Subcommand)]
@@ -49,6 +50,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AddressFilterHandler::new(args.grpc_uri)
                 .execute(command)
                 .await?
+        },
+        Command::ListRedeemable => {
+            let mut client = SwapManagerClient::connect(args.grpc_uri).await?;
+            let redeemables = client.list_redeemable(Request::new(ListRedeemableRequest::default())).await?;
+            println!("{}", serde_json::to_string_pretty(&redeemables.into_inner())?)
         }
     }
 

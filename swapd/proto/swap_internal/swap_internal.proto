@@ -5,6 +5,7 @@ service SwapManager {
     rpc AddAddressFilters (AddAddressFiltersRequest) returns (AddAddressFiltersReply) {}
     rpc GetInfo (GetInfoRequest) returns (GetInfoReply) {}
     rpc GetSwap (GetSwapRequest) returns (GetSwapReply) {}
+    rpc ListRedeemable (ListRedeemableRequest) returns (ListRedeemableReply) {}
     rpc Stop (StopRequest) returns (StopReply) {}
 }
 
@@ -32,6 +33,21 @@ message GetSwapReply {
 message SwapOutput {
     string outpoint = 1;
     optional uint64 confirmation_height = 2;
+}
+
+message ListRedeemableRequest {}
+message ListRedeemableReply {
+    repeated Redeemable redeemables = 1;
+}
+message Redeemable {
+    int32 blocks_left = 1;
+    string swap_hash = 2;
+    uint32 lock_time = 3;
+    repeated RedeemableUtxo utxos = 4;
+}
+message RedeemableUtxo {
+    string outpoint = 1;
+    uint64 confirmation_height = 2;
 }
 
 message StopRequest {}

@@ -10,14 +10,16 @@ use tonic::{Request, Response, Status};
 use tracing::{instrument, warn};
 
 use crate::{
-    chain::ChainRepository,
+    chain::{ChainClient, ChainRepository},
     chain_filter::ChainFilterRepository,
+    redeem::{RedeemService, RedeemServiceError},
     swap::{GetSwapError, SwapRepository},
 };
 
 use internal_swap_api::{
     swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest,
-    GetInfoReply, GetInfoRequest, GetSwapReply, GetSwapRequest, StopReply, StopRequest, SwapOutput,
+    GetInfoReply, GetInfoRequest, GetSwapReply, GetSwapRequest, ListRedeemableReply,
+    ListRedeemableRequest, Redeemable, RedeemableUtxo, StopReply, StopRequest, SwapOutput,
 };
 
 pub mod internal_swap_api {
@@ -25,36 +27,44 @@ pub mod internal_swap_api {
 }
 
 #[derive(Debug)]
-pub struct Server<CF, CR, SR>
+pub struct Server<CC, CF, CR, SR>
 where
+    CC: ChainClient,
     CF: ChainFilterRepository,
     CR: ChainRepository,
     SR: SwapRepository,
 {
+    chain_client: Arc<CC>,
     chain_filter_repository: Arc<CF>,
     chain_repository: Arc<CR>,
     network: Network,
+    redeem_service: Arc<RedeemService<CR, SR>>,
     swap_repository: Arc<SR>,
     token: CancellationToken,
 }
 
-impl<CF, CR, SR> Server<CF, CR, SR>
+impl<CC, CF, CR, SR> Server<CC, CF, CR, SR>
 where
+    CC: ChainClient,
     CR: ChainRepository,
     CF: ChainFilterRepository,
     SR: SwapRepository,
 {
     pub fn new(
         network: Network,
+        chain_client: Arc<CC>,
         chain_filter_repository: Arc<CF>,
         chain_repository: Arc<CR>,
+        redeem_service: Arc<RedeemService<CR, SR>>,
         swap_repository: Arc<SR>,
         token: CancellationToken,
     ) -> Self {
         Self {
             network,
+            chain_client,
             chain_filter_repository,
             chain_repository,
+            redeem_service,
             swap_repository,
             token,
         }
@@ -62,8 +72,9 @@ where
 }
 
 #[tonic::async_trait]
-impl<CF, CR, SR> SwapManager for Server<CF, CR, SR>
+impl<CC, CF, CR, SR> SwapManager for Server<CC, CF, CR, SR>
 where
+    CC: ChainClient + Send + Sync + 'static,
     CF: ChainFilterRepository + Send + Sync + 'static,
     CR: ChainRepository + Send + Sync + 'static,
     SR: SwapRepository + Send + Sync + 'static,
@@ -205,8 +216,41 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
+    async fn list_redeemable(
+        &self,
+        _request: Request<ListRedeemableRequest>,
+    ) -> Result<Response<ListRedeemableReply>, Status> {
+        let current_height = self.chain_client.get_blockheight().await?;
+        let redeemables = self.redeem_service.list_redeemable().await?;
+        Ok(Response::new(ListRedeemableReply {
+            redeemables: redeemables
+                .into_iter()
+                .map(|redeemable| Redeemable {
+                    blocks_left: redeemable.blocks_left(current_height),
+                    lock_time: redeemable.swap.public.lock_time,
+                    swap_hash: redeemable.swap.public.hash.to_string(),
+                    utxos: redeemable
+                        .utxos
+                        .iter()
+                        .map(|utxo| RedeemableUtxo {
+                            confirmation_height: utxo.block_height,
+                            outpoint: utxo.outpoint.to_string(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }))
+    }
+
+    #[instrument(skip(self), level = "debug")]
     async fn stop(&self, _request: Request<StopRequest>) -> Result<Response<StopReply>, Status> {
         self.token.cancel();
         Ok(Response::new(StopReply {}))
+    }
+}
+
+impl From<RedeemServiceError> for Status {
+    fn from(value: RedeemServiceError) -> Self {
+        Status::internal(value.to_string())
     }
 }

@@ -7,7 +7,7 @@ use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
-use redeem::{PreimageMonitor, RedeemMonitor, RedeemMonitorParams};
+use redeem::{PreimageMonitor, RedeemMonitor, RedeemMonitorParams, RedeemService};
 use reqwest::Url;
 use sqlx::PgPool;
 use swap::{RandomPrivateKeyProvider, SwapService};
@@ -224,11 +224,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fee_estimator: Arc::clone(&fee_estimator),
     }));
 
+    let redeem_service = Arc::new(RedeemService::new(
+        Arc::clone(&chain_repository),
+        Arc::clone(&swap_repository),
+    ));
     let token = CancellationToken::new();
     let internal_server = SwapManagerServer::new(internal_server::Server::new(
         args.network,
+        Arc::clone(&chain_client),
         chain_filter_repository,
         Arc::clone(&chain_repository),
+        Arc::clone(&redeem_service),
         Arc::clone(&swap_repository),
         token.clone(),
     ));
@@ -240,12 +246,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let redeem_monitor = RedeemMonitor::new(RedeemMonitorParams {
         chain_client: Arc::clone(&chain_client),
-        chain_repository: Arc::clone(&chain_repository),
         fee_estimator: Arc::clone(&fee_estimator),
         poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
         swap_repository: Arc::clone(&swap_repository),
         swap_service: Arc::clone(&swap_service),
         redeem_repository: Arc::clone(&redeem_repository),
+        redeem_service: Arc::clone(&redeem_service),
         wallet: Arc::clone(&cln_client),
     });
     let preimage_monitor = PreimageMonitor::new(
