@@ -245,22 +245,22 @@ where
             &redeemable.preimage,
             destination_address.clone(),
         )?;
-        self.redeem_repository
-            .add_redeem(&Redeem {
-                creation_time: SystemTime::now(),
-                destination_address,
-                fee_per_kw: fee_estimate.sat_per_kw,
-                tx: redeem_tx.clone(),
-                swap_hash: redeemable.swap.public.hash,
-            })
-            .await?;
         debug!(
             fee_per_kw = fee_estimate.sat_per_kw,
             hash = field::display(redeemable.swap.public.hash),
             tx_id = field::display(redeem_tx.txid()),
             "broadcasting new redeem tx"
         );
-        self.chain_client.broadcast_tx(redeem_tx).await?;
+        self.chain_client.broadcast_tx(redeem_tx.clone()).await?;
+        self.redeem_repository
+            .add_redeem(&Redeem {
+                creation_time: SystemTime::now(),
+                destination_address,
+                fee_per_kw: fee_estimate.sat_per_kw,
+                tx: redeem_tx,
+                swap_hash: redeemable.swap.public.hash,
+            })
+            .await?;
         Ok(())
     }
 }
