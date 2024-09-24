@@ -15,12 +15,12 @@ from pyln.testing.fixtures import (
 )
 from pyln.testing.utils import wait_for
 from fixtures import whatthefee, swapd_factory, postgres_factory
+import grpc
 import hashlib
 import os
-import grpc
 
 
-def test_filtered_address(node_factory, swapd_factory):
+def test_pay_after_deadline_fails(node_factory, swapd_factory):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
     swapper.lightning_node.openchannel(user, 1000000)
@@ -30,24 +30,22 @@ def test_filtered_address(node_factory, swapd_factory):
             for channel in swapper.lightning_node.rpc.listpeerchannels()["channels"]
         )
     )
-    user_address = user.rpc.newaddr()["bech32"]
-    # create 2 utxos, because the first will be needed as reserve
-    user_address, user_txid = user.fundwallet(200_000)
-    swapper.internal_rpc.add_address_filters([user_address])
-
     user_node_id = user.info["id"]
     secret_key = CBitcoinSecret.from_secret_bytes(os.urandom(32))
     public_key = secret_key.pub
     preimage = os.urandom(32)
     h = hashlib.sha256(preimage).digest()
     add_fund_resp = swapper.rpc.add_fund_init(user, public_key, h)
-    txid = user.rpc.withdraw(add_fund_resp.address, 100_000)["txid"]
+    txid = user.bitcoin.rpc.sendtoaddress(add_fund_resp.address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
     wait_for(
         lambda: len(swapper.internal_rpc.get_swap(add_fund_resp.address).outputs) > 0
     )
 
+    height = user.bitcoin.rpc.getblockcount()
+    user.bitcoin.generate_block(216)
+    user.bitcoin.wait_for_log(r"UpdateTip: new best=.* height={}".format(height + 216))
     payment_request = user.rpc.invoice(
         100_000_000,
         "swap-success",

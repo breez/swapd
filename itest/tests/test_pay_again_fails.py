@@ -58,5 +58,6 @@ def test_pay_again_fails(node_factory, swapd_factory):
     )
     try:
         swapper.rpc.get_swap_payment(payment_request)
+        assert False
     except grpc._channel._InactiveRpcError as e:
         assert e.details() == "swap already paid"
