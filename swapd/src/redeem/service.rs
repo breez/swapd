@@ -17,9 +17,8 @@ pub struct Redeemable {
 impl Redeemable {
     pub fn blocks_left(&self, current_height: u64) -> i32 {
         let min_conf_height = self.utxos.iter().map(|u| u.block_height).min().unwrap_or(0);
-        let blocks_left = (self.swap.public.lock_time as i32)
-            - (current_height.saturating_sub(min_conf_height) as i32);
-        blocks_left
+        (self.swap.public.lock_time as i32)
+            - (current_height.saturating_sub(min_conf_height) as i32)
     }
 }
 
