@@ -5,8 +5,14 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use internal_swap_api::{swap_manager_client::SwapManagerClient, AddAddressFiltersRequest, ListRedeemableRequest};
-use tonic::{transport::Uri, Request};
+use internal_swap_api::{
+    swap_manager_client::SwapManagerClient, AddAddressFiltersRequest, GetInfoRequest,
+    ListRedeemableRequest,
+};
+use tonic::{
+    transport::{Channel, Uri},
+    Request,
+};
 
 mod internal_swap_api {
     tonic::include_proto!("swap_internal");
@@ -29,7 +35,8 @@ enum Command {
         #[command(subcommand)]
         command: AddressFiltersCommand,
     },
-    ListRedeemable
+    GetInfo,
+    ListRedeemable,
 }
 
 #[derive(Subcommand)]
@@ -45,16 +52,25 @@ enum AddressFiltersCommand {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let mut client = SwapManagerClient::connect(args.grpc_uri).await?;
+
     match args.command {
         Command::AddressFilters { command } => {
-            AddressFilterHandler::new(args.grpc_uri)
-                .execute(command)
+            AddressFilterHandler::new(client).execute(command).await?
+        }
+        Command::GetInfo => {
+            let resp = client
+                .get_info(Request::new(GetInfoRequest::default()))
                 .await?
-        },
+                .into_inner();
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        }
         Command::ListRedeemable => {
-            let mut client = SwapManagerClient::connect(args.grpc_uri).await?;
-            let redeemables = client.list_redeemable(Request::new(ListRedeemableRequest::default())).await?;
-            println!("{}", serde_json::to_string_pretty(&redeemables.into_inner())?)
+            let resp = client
+                .list_redeemable(Request::new(ListRedeemableRequest::default()))
+                .await?
+                .into_inner();
+            println!("{}", serde_json::to_string_pretty(&resp)?)
         }
     }
 
@@ -62,16 +78,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct AddressFilterHandler {
-    grpc_uri: Uri,
+    client: SwapManagerClient<Channel>,
 }
 
 impl AddressFilterHandler {
-    fn new(grpc_uri: Uri) -> Self {
-        Self { grpc_uri }
+    fn new(client: SwapManagerClient<Channel>) -> Self {
+        Self { client }
     }
 
     async fn execute(
-        &self,
+        &mut self,
         command: AddressFiltersCommand,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match command {
@@ -81,14 +97,16 @@ impl AddressFilterHandler {
         Ok(())
     }
 
-    async fn add_address_filters(&self, file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    async fn add_address_filters(
+        &mut self,
+        file: PathBuf,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let file = File::open(file).expect("no such file");
         let reader = BufReader::new(file);
         let addresses = reader
             .lines()
             .collect::<Result<Vec<String>, std::io::Error>>()?;
-        let mut client = SwapManagerClient::connect(self.grpc_uri.clone()).await?;
-        client
+        self.client
             .add_address_filters(Request::new(AddAddressFiltersRequest { addresses }))
             .await?;
         Ok(())
