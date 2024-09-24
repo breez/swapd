@@ -8,7 +8,7 @@ pub struct Utxo {
     pub amount_sat: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BlockHeader {
     pub hash: BlockHash,
     pub height: u64,

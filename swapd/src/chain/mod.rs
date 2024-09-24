@@ -1,5 +1,6 @@
 mod client;
 mod fee_estimator;
+mod memchain;
 mod monitor;
 mod repository;
 mod types;

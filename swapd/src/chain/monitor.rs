@@ -1,12 +1,12 @@
 use std::{collections::HashMap, future::Future, pin::pin, sync::Arc, time::Duration};
 
-use bitcoin::{block::Bip34Error, Address, Block, BlockHash, Network, OutPoint};
+use bitcoin::{block::Bip34Error, Address, Block, Network, OutPoint};
 use futures::future::{FusedFuture, FutureExt};
 use tracing::debug;
 
 use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Utxo};
 
-use super::{types::BlockHeader, ChainError, ChainRepositoryError};
+use super::{memchain::Chain, types::BlockHeader, ChainError, ChainRepositoryError};
 
 pub struct ChainMonitor<C, R>
 where
@@ -69,7 +69,7 @@ where
         }
 
         loop {
-            chain = self.do_sync(&chain).await?;
+            self.do_sync(&mut chain).await?;
 
             tokio::select! {
                 _ = &mut sig => {
@@ -83,7 +83,7 @@ where
         Ok(())
     }
 
-    async fn do_sync(&self, existing_chain: &Chain) -> Result<Chain, ChainError>
+    async fn do_sync(&self, existing_chain: &mut Chain) -> Result<(), ChainError>
     where
         C: ChainClient,
         R: ChainRepository,
@@ -115,9 +115,10 @@ where
         // If the base and tip don't match, there was a reorg.
         debug!(
             "block headers caught up. new chain base: {}, existing chain tip: {}",
-            new_chain.base, existing_chain.tip
+            new_chain.base(),
+            existing_chain.tip()
         );
-        if new_chain.base != existing_chain.tip {
+        if new_chain.base() != existing_chain.tip() {
             for reorg_block in existing_chain.iter_backwards() {
                 if new_chain.contains_block(&reorg_block.hash) {
                     break;
@@ -142,9 +143,8 @@ where
             self.process_block(&block).await?;
         }
 
-        new_chain.rebase(existing_chain)?;
-
-        Ok(new_chain)
+        existing_chain.retip(&new_chain)?;
+        Ok(())
     }
 
     async fn process_block(&self, block: &Block) -> Result<(), ChainError> {
@@ -219,193 +219,6 @@ where
             )
             .await?;
         Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct Chain {
-    tip: BlockHash,
-    base: BlockHash,
-    blocks: HashMap<BlockHash, BlockInfo>,
-}
-
-#[derive(Clone)]
-struct BlockInfo {
-    header: BlockHeader,
-    next: Option<BlockHash>,
-}
-
-impl Chain {
-    fn new(tip: BlockHeader) -> Self {
-        let mut chain = Chain {
-            tip: tip.hash,
-            base: tip.hash,
-            blocks: HashMap::new(),
-        };
-        chain.blocks.insert(
-            tip.hash,
-            BlockInfo {
-                header: tip,
-                next: None,
-            },
-        );
-        chain
-    }
-
-    fn contains_block(&self, hash: &BlockHash) -> bool {
-        self.blocks.contains_key(hash)
-    }
-
-    fn get_block(&self, hash: &BlockHash) -> Result<BlockHeader, ChainError> {
-        match self.blocks.get(hash) {
-            Some(block) => Ok(block.header.clone()),
-            None => Err(ChainError::BlockNotFound),
-        }
-    }
-
-    fn prepend(&mut self, base: BlockHeader) -> Result<(), ChainError> {
-        let old_base = self
-            .blocks
-            .get(&self.base)
-            .expect("chain doesn't contain its own base");
-        if old_base.header.prev != base.hash {
-            return Err(ChainError::InvalidChain);
-        }
-
-        self.base = base.hash;
-        self.blocks.insert(
-            base.hash,
-            BlockInfo {
-                header: base,
-                next: Some(old_base.header.hash),
-            },
-        );
-        Ok(())
-    }
-
-    fn rebase(&mut self, other: &Chain) -> Result<(), ChainError> {
-        let mut next_block = self
-            .blocks
-            .get(&self.base)
-            .expect("chain doesn't contain its own base")
-            .header
-            .clone();
-        loop {
-            if next_block.hash == other.base {
-                break;
-            }
-
-            let current_block = other.get_block(&next_block.prev)?;
-            self.prepend(current_block.clone())?;
-            next_block = current_block;
-        }
-
-        Ok(())
-    }
-
-    fn iter_forwards(&self) -> ForwardChainIterator {
-        ForwardChainIterator::new(self)
-    }
-
-    fn iter_backwards(&self) -> BackwardChainIterator {
-        BackwardChainIterator::new(self)
-    }
-}
-
-struct ForwardChainIterator<'a> {
-    chain: &'a Chain,
-    current: Option<&'a BlockInfo>,
-}
-
-impl<'a> ForwardChainIterator<'a> {
-    fn new(chain: &'a Chain) -> Self {
-        let current = chain
-            .blocks
-            .get(&chain.base)
-            .expect("chain does not contain its own base");
-        ForwardChainIterator {
-            chain,
-            current: Some(current),
-        }
-    }
-}
-
-impl<'a> Iterator for ForwardChainIterator<'a> {
-    type Item = &'a BlockHeader;
-    fn next(&mut self) -> Option<&'a BlockHeader> {
-        let current = match self.current {
-            Some(current) => current,
-            None => return None,
-        };
-
-        self.current = match current.next {
-            Some(next) => Some(
-                self.chain
-                    .blocks
-                    .get(&next)
-                    .expect("chain does not contain expected next block"),
-            ),
-            None => None,
-        };
-
-        Some(&current.header)
-    }
-}
-
-struct BackwardChainIterator<'a> {
-    chain: &'a Chain,
-    current: Option<&'a BlockInfo>,
-}
-
-impl<'a> BackwardChainIterator<'a> {
-    fn new(chain: &'a Chain) -> Self {
-        let current = chain
-            .blocks
-            .get(&chain.tip)
-            .expect("chain doesn't contain its own tip");
-        BackwardChainIterator {
-            chain,
-            current: Some(current),
-        }
-    }
-}
-
-impl<'a> Iterator for BackwardChainIterator<'a> {
-    type Item = &'a BlockHeader;
-    fn next(&mut self) -> Option<&'a BlockHeader> {
-        let current = match self.current {
-            Some(current) => current,
-            None => return None,
-        };
-
-        self.current = match current.header.hash == self.chain.base {
-            true => None,
-            false => Some(
-                self.chain
-                    .blocks
-                    .get(&current.header.prev)
-                    .expect("chain does not contain expected prev block"),
-            ),
-        };
-
-        Some(&current.header)
-    }
-}
-
-impl TryFrom<Vec<super::types::BlockHeader>> for Chain {
-    type Error = ChainError;
-
-    fn try_from(headers: Vec<super::types::BlockHeader>) -> Result<Self, Self::Error> {
-        if headers.is_empty() {
-            return Err(ChainError::EmptyChain);
-        }
-
-        let tip_header = headers[0].clone();
-        let mut chain = Chain::new(tip_header);
-        for header in headers.into_iter().skip(1) {
-            chain.prepend(header)?;
-        }
-        Ok(chain)
     }
 }
 
