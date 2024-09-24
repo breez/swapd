@@ -2184,6 +2184,7 @@ name = "swap-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hex",
  "prost",
  "serde",
  "serde_json",

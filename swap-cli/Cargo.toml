@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
+hex = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

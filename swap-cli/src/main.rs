@@ -7,7 +7,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use internal_swap_api::{
     swap_manager_client::SwapManagerClient, AddAddressFiltersRequest, GetInfoRequest,
-    ListRedeemableRequest,
+    GetSwapRequest, ListRedeemableRequest,
 };
 use tonic::{
     transport::{Channel, Uri},
@@ -16,6 +16,10 @@ use tonic::{
 
 mod internal_swap_api {
     tonic::include_proto!("swap_internal");
+}
+
+fn parse_hex(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    hex::decode(s)
 }
 
 #[derive(Parser)]
@@ -36,6 +40,14 @@ enum Command {
         command: AddressFiltersCommand,
     },
     GetInfo,
+    GetSwap {
+        #[clap(long)]
+        address: Option<String>,
+        #[clap(long)]
+        payment_request: Option<String>,
+        #[clap(long, value_parser(parse_hex))]
+        hash: Option<Vec<u8>>,
+    },
     ListRedeemable,
 }
 
@@ -61,6 +73,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::GetInfo => {
             let resp = client
                 .get_info(Request::new(GetInfoRequest::default()))
+                .await?
+                .into_inner();
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        }
+        Command::GetSwap {
+            address,
+            payment_request,
+            hash,
+        } => {
+            let resp = client
+                .get_swap(Request::new(GetSwapRequest {
+                    address,
+                    payment_request,
+                    payment_hash: hash,
+                }))
                 .await?
                 .into_inner();
             println!("{}", serde_json::to_string_pretty(&resp)?);
