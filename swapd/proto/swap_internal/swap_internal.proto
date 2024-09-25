@@ -48,6 +48,7 @@ message Redeemable {
 message RedeemableUtxo {
     string outpoint = 1;
     uint64 confirmation_height = 2;
+    optional string paid_with_request = 3;
 }
 
 message StopRequest {}

@@ -5,7 +5,7 @@ use futures::future::{FusedFuture, FutureExt};
 use futures::{stream::FuturesUnordered, StreamExt};
 use thiserror::Error;
 use tokio::join;
-use tracing::{debug, error, field, instrument, trace, warn};
+use tracing::{debug, error, field, instrument, trace};
 
 use crate::chain::BroadcastError;
 use crate::{
@@ -42,7 +42,6 @@ where
     pub chain_client: Arc<CC>,
     pub fee_estimator: Arc<FE>,
     pub poll_interval: Duration,
-    pub swap_repository: Arc<SR>,
     pub swap_service: Arc<SwapService<P>>,
     pub redeem_repository: Arc<RR>,
     pub redeem_service: Arc<RedeemService<CR, SR>>,
@@ -62,7 +61,6 @@ where
     chain_client: Arc<CC>,
     fee_estimator: Arc<FE>,
     poll_interval: Duration,
-    swap_repository: Arc<SR>,
     swap_service: Arc<SwapService<P>>,
     redeem_repository: Arc<RR>,
     redeem_service: Arc<RedeemService<CR, SR>>,
@@ -84,7 +82,6 @@ where
             chain_client: params.chain_client,
             fee_estimator: params.fee_estimator,
             poll_interval: params.poll_interval,
-            swap_repository: params.swap_repository,
             swap_service: params.swap_service,
             redeem_repository: params.redeem_repository,
             redeem_service: params.redeem_service,
@@ -143,41 +140,19 @@ where
         redeemable: Redeemable,
         current_height: u64,
     ) -> Result<(), RedeemError> {
-        let utxos: Vec<_> = match self
-            .swap_repository
-            .get_paid_outpoints(&redeemable.swap.public.hash)
-            .await
-        {
-            Ok(outpoints) => {
-                if outpoints.is_empty() {
-                    warn!(
-                        hash = field::display(redeemable.swap.public.hash),
-                        "Could not find paid outpoints for paid swap, redeeming all known utxos"
-                    );
-
-                    // If the outpoint list is empty, claim all utxos to be sure to redeem something.
-                    redeemable.utxos
-                } else {
-                    // Take only outputs that are still unspent. If some are skipped, that may be a loss.
-                    redeemable
-                        .utxos
-                        .into_iter()
-                        .filter(|u| outpoints.contains(&u.outpoint))
-                        .collect()
-                }
-            }
-            Err(e) => {
-                error!(
-                    hash = field::display(redeemable.swap.public.hash),
-                    "Failed to get paid outpoints for paid swap, redeeming all known utxos: {:?}",
-                    e
-                );
-
-                // If the database call failed, claim all utxos to be sure to redeem something.
-                redeemable.utxos
-            }
-        };
-
+        // Only redeem utxos that were paid as part of an invoice payment. Users
+        // sometimes send funds to the same address multiple times, even though
+        // it is no longer safe to do so, because it's not obvious to a user
+        // a P2WSH address should not be reused. Be a good citizen and allow the
+        // user to refund those utxos. Note these utxos can still be redeemed
+        // manually by the swap server if needed.
+        let utxos: Vec<_> = redeemable
+            .utxos
+            .iter()
+            .filter(|utxo| utxo.paid_with_request.is_some())
+            .map(|utxo| &utxo.utxo)
+            .cloned()
+            .collect();
         if utxos.is_empty() {
             return Ok(());
         }

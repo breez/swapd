@@ -233,8 +233,9 @@ where
                         .utxos
                         .iter()
                         .map(|utxo| RedeemableUtxo {
-                            confirmation_height: utxo.block_height,
-                            outpoint: utxo.outpoint.to_string(),
+                            confirmation_height: utxo.utxo.block_height,
+                            outpoint: utxo.utxo.outpoint.to_string(),
+                            paid_with_request: utxo.paid_with_request.clone(),
                         })
                         .collect(),
                 })

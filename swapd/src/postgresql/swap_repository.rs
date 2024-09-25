@@ -16,8 +16,9 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapError, GetSwapsError, PaymentAttempt,
-        Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapError, GetSwapsError, PaidOutpoint,
+        PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
+        SwapStatePaidOutpoints,
     },
 };
 
@@ -352,31 +353,6 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn get_paid_outpoints(
-        &self,
-        hash: &sha256::Hash,
-    ) -> Result<Vec<OutPoint>, GetPaidUtxosError> {
-        let mut rows = sqlx::query(
-            r#"SELECT DISTINCT patx.tx_id
-               ,               patx.output_index
-               FROM swaps s
-               INNER JOIN payment_attempts pa ON s.payment_hash = pa.swap_payment_hash
-               INNER JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
-               WHERE pa.success = true"#,
-        )
-        .bind(hash.as_byte_array().to_vec())
-        .fetch(&*self.pool);
-
-        let mut result = Vec::new();
-        while let Some(row) = rows.try_next().await? {
-            let tx_id: String = row.try_get("tx_id")?;
-            let output_index: i64 = row.try_get("output_index")?;
-            result.push(OutPoint::new(tx_id.parse()?, output_index as u32));
-        }
-        Ok(result)
-    }
-
-    #[instrument(level = "trace", skip(self))]
     async fn get_swaps(
         &self,
         addresses: &[Address],
@@ -445,6 +421,115 @@ impl crate::swap::SwapRepository for SwapRepository {
                     },
                 },
             );
+        }
+
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn get_swaps_with_paid_outpoints(
+        &self,
+        addresses: &[Address],
+    ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError> {
+        let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
+        let mut rows = sqlx::query(
+            r#"SELECT s.creation_time
+               ,      s.payment_hash
+               ,      s.payer_pubkey
+               ,      s.swapper_pubkey
+               ,      s.script
+               ,      s.address
+               ,      s.lock_time
+               ,      s.swapper_privkey
+               ,      s.preimage
+               ,      po.payment_request
+               ,      po.tx_id
+               ,      po.output_index
+               FROM swaps s
+               LEFT JOIN (
+                   SELECT DISTINCT s_sub.payment_hash
+                   ,               pa.payment_request
+                   ,               patx.tx_id
+                   ,               patx.output_index
+                   FROM swaps s_sub
+                   INNER JOIN payment_attempts pa ON s_sub.payment_hash = pa.swap_payment_hash
+                   INNER JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
+                   WHERE pa.success = true
+               ) po ON s.payment_hash = po.payment_hash
+               WHERE s.address = ANY($1)
+               ORDER BY s.payment_hash"#,
+        )
+        .bind(addresses)
+        .fetch(&*self.pool);
+
+        let mut result = HashMap::new();
+        while let Some(row) = rows.try_next().await? {
+            let address: &str = row.try_get("address")?;
+            let address = address
+                .parse::<Address<NetworkUnchecked>>()?
+                .require_network(self.network)?;
+            if !result.contains_key(&address) {
+                let creation_time: i64 = row.try_get("creation_time")?;
+                let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
+                let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
+                let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
+                let script: Vec<u8> = row.try_get("script")?;
+
+                let lock_time: i64 = row.try_get("lock_time")?;
+                let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
+                let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
+
+                let creation_time = SystemTime::UNIX_EPOCH
+                    .checked_add(Duration::from_secs(creation_time as u64))
+                    .ok_or(GetSwapsError::General("invalid timestamp".into()))?;
+                let swap = Swap {
+                    creation_time,
+                    public: SwapPublicData {
+                        address: address.clone(),
+                        hash: sha256::Hash::from_slice(&payment_hash)?,
+                        lock_time: lock_time as u32,
+                        payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
+                        swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
+                        script: ScriptBuf::from_bytes(script),
+                    },
+                    private: SwapPrivateData {
+                        swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
+                    },
+                };
+
+                let preimage = match preimage {
+                    Some(preimage) => Some(
+                        preimage
+                            .try_into()
+                            .map_err(|_| GetSwapsError::InvalidPreimage)?,
+                    ),
+                    None => None,
+                };
+
+                result.insert(
+                    address.clone(),
+                    SwapStatePaidOutpoints {
+                        paid_outpoints: Vec::new(),
+                        swap_state: SwapState { swap, preimage },
+                    },
+                );
+            }
+
+            let tx_id: Option<String> = row.try_get("tx_id")?;
+            let output_index: Option<i64> = row.try_get("output_index")?;
+            let payment_request: Option<String> = row.try_get("payment_request")?;
+
+            if let (Some(tx_id), Some(output_index), Some(payment_request)) =
+                (tx_id, output_index, payment_request)
+            {
+                let entry = result.get_mut(&address).ok_or(GetSwapsError::General(
+                    "missing expected address in map".into(),
+                ))?;
+                entry.paid_outpoints.push(PaidOutpoint {
+                    outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
+                    payment_request,
+                });
+            }
         }
 
         Ok(result)

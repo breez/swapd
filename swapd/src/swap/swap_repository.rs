@@ -52,6 +52,18 @@ pub struct PaymentAttempt {
     pub payment_request: String,
 }
 
+#[derive(Debug)]
+pub struct SwapStatePaidOutpoints {
+    pub swap_state: SwapState,
+    pub paid_outpoints: Vec<PaidOutpoint>,
+}
+
+#[derive(Debug)]
+pub struct PaidOutpoint {
+    pub outpoint: OutPoint,
+    pub payment_request: String,
+}
+
 #[async_trait::async_trait]
 pub trait SwapRepository {
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError>;
@@ -65,10 +77,6 @@ pub trait SwapRepository {
         label: &str,
         result: &PaymentResult,
     ) -> Result<(), AddPaymentResultError>;
-    async fn get_paid_outpoints(
-        &self,
-        hash: &sha256::Hash,
-    ) -> Result<Vec<OutPoint>, GetPaidUtxosError>;
     async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
     async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapError>;
     async fn get_swap_by_payment_request(
@@ -79,4 +87,8 @@ pub trait SwapRepository {
         &self,
         addresses: &[Address],
     ) -> Result<HashMap<Address, SwapState>, GetSwapsError>;
+    async fn get_swaps_with_paid_outpoints(
+        &self,
+        addresses: &[Address],
+    ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError>;
 }

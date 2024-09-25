@@ -248,7 +248,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chain_client: Arc::clone(&chain_client),
         fee_estimator: Arc::clone(&fee_estimator),
         poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
-        swap_repository: Arc::clone(&swap_repository),
         swap_service: Arc::clone(&swap_service),
         redeem_repository: Arc::clone(&redeem_repository),
         redeem_service: Arc::clone(&redeem_service),
