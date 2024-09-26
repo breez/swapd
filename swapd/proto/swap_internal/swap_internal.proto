@@ -6,6 +6,7 @@ service SwapManager {
     rpc GetInfo (GetInfoRequest) returns (GetInfoReply) {}
     rpc GetSwap (GetSwapRequest) returns (GetSwapReply) {}
     rpc ListRedeemable (ListRedeemableRequest) returns (ListRedeemableReply) {}
+    rpc Redeem(RedeemRequest) returns (RedeemReply) {}
     rpc Stop (StopRequest) returns (StopReply) {}
 }
 
@@ -37,18 +38,27 @@ message SwapOutput {
 
 message ListRedeemableRequest {}
 message ListRedeemableReply {
-    repeated Redeemable redeemables = 1;
+    repeated RedeemableUtxo redeemables = 1;
 }
-message Redeemable {
-    int32 blocks_left = 1;
-    string swap_hash = 2;
-    uint32 lock_time = 3;
-    repeated RedeemableUtxo utxos = 4;
-}
+
 message RedeemableUtxo {
     string outpoint = 1;
-    uint64 confirmation_height = 2;
-    optional string paid_with_request = 3;
+    string swap_hash = 2;
+    uint32 lock_time = 3;
+    uint64 confirmation_height = 4;
+    int32 blocks_left = 5;
+    optional string paid_with_request = 6;
+}
+
+message RedeemRequest {
+    repeated string outpoints = 1;
+    optional string destination_address = 2;
+    optional uint32 fee_per_kw = 3;
+    bool auto_bump = 4;
+}
+message RedeemReply {
+    string tx_id = 1;
+    uint32 fee_per_kw = 2;
 }
 
 message StopRequest {}

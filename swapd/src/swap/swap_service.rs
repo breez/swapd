@@ -20,6 +20,21 @@ use super::privkey_provider::PrivateKeyProvider;
 // TODO: Verify this size
 const REDEEM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
 
+#[derive(Clone, Debug)]
+pub struct RedeemableUtxo {
+    pub swap: Swap,
+    pub utxo: Utxo,
+    pub paid_with_request: Option<String>,
+    pub preimage: [u8; 32],
+}
+
+impl RedeemableUtxo {
+    pub fn blocks_left(&self, current_height: u64) -> i32 {
+        (self.swap.public.lock_time as i32)
+            - (current_height.saturating_sub(self.utxo.block_height) as i32)
+    }
+}
+
 #[derive(Debug)]
 pub struct SwapState {
     pub swap: Swap,
@@ -161,21 +176,24 @@ where
     #[instrument(level = "trace", skip(self))]
     pub fn create_redeem_tx(
         &self,
-        swap: &Swap,
-        utxos: &[Utxo],
+        redeemables: &[RedeemableUtxo],
         fee: &FeeEstimate,
         current_height: u64,
-        preimage: &[u8; 32],
         destination_address: Address,
     ) -> Result<Transaction, CreateRedeemTxError> {
-        let total_value = utxos.iter().fold(0u64, |sum, utxo| sum + utxo.amount_sat);
+        // Sort by outpoint to reproducibly craft the same tx.
+        let mut redeemables = redeemables.to_vec();
+        redeemables.sort_by(|a, b| a.utxo.outpoint.cmp(&b.utxo.outpoint));
+        let total_value = redeemables
+            .iter()
+            .fold(0u64, |sum, r| sum + r.utxo.amount_sat);
         let mut tx = Transaction {
             version: 2,
             lock_time: LockTime::from_height(current_height as u32)?,
-            input: utxos
+            input: redeemables
                 .iter()
-                .map(|utxo| TxIn {
-                    previous_output: utxo.outpoint,
+                .map(|r| TxIn {
+                    previous_output: r.utxo.outpoint,
                     script_sig: ScriptBuf::default(),
                     sequence: Sequence::ZERO,
                     witness: Witness::default(),
@@ -208,23 +226,27 @@ where
         tx.output[0].value = value_after_fees_sat;
 
         let mut inputs = Vec::new();
-        for (n, utxo) in utxos.iter().enumerate() {
+        for (n, r) in redeemables.iter().enumerate() {
             let mut sighasher = sighash::SighashCache::new(&tx);
             let sighash = sighasher.segwit_signature_hash(
                 n,
-                &swap.public.script,
-                utxo.amount_sat,
+                &r.swap.public.script,
+                r.utxo.amount_sat,
                 EcdsaSighashType::All,
             )?;
             let msg = Message::from(sighash);
-            let secret_key = SecretKey::from_slice(&swap.private.swapper_privkey.to_bytes())?;
+            let secret_key = SecretKey::from_slice(&r.swap.private.swapper_privkey.to_bytes())?;
             let mut signature = self
                 .secp
                 .sign_ecdsa(&msg, &secret_key)
                 .serialize_der()
                 .to_vec();
             signature.push(EcdsaSighashType::All as u8);
-            let witness = vec![signature, preimage.to_vec(), swap.public.script.to_bytes()];
+            let witness = vec![
+                signature,
+                r.preimage.to_vec(),
+                r.swap.public.script.to_bytes(),
+            ];
             let mut input = tx.input[n].clone();
             input.witness = witness.into();
             inputs.push(input);

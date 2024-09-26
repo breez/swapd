@@ -3,23 +3,25 @@ use std::sync::Arc;
 use bitcoin::{
     address::{NetworkChecked, NetworkUnchecked},
     hashes::{sha256, Hash},
-    Address, Network,
+    Address, Network, OutPoint,
 };
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{instrument, warn};
 
 use crate::{
-    chain::{ChainClient, ChainRepository},
+    chain::{ChainClient, ChainRepository, FeeEstimate, FeeEstimator},
     chain_filter::ChainFilterRepository,
-    redeem::{RedeemService, RedeemServiceError},
-    swap::{GetSwapError, SwapRepository},
+    redeem::{RedeemError, RedeemRepository, RedeemService, RedeemServiceError},
+    swap::{GetSwapError, PrivateKeyProvider, SwapRepository},
+    wallet::{Wallet, WalletError},
 };
 
 use internal_swap_api::{
     swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest,
     GetInfoReply, GetInfoRequest, GetSwapReply, GetSwapRequest, ListRedeemableReply,
-    ListRedeemableRequest, Redeemable, RedeemableUtxo, StopReply, StopRequest, SwapOutput,
+    ListRedeemableRequest, RedeemReply, RedeemRequest, RedeemableUtxo, StopReply, StopRequest,
+    SwapOutput,
 };
 
 pub mod internal_swap_api {
@@ -27,57 +29,88 @@ pub mod internal_swap_api {
 }
 
 #[derive(Debug)]
-pub struct Server<CC, CF, CR, SR>
+pub struct ServerParams<CC, CF, CR, F, P, RR, SR, W>
 where
     CC: ChainClient,
     CF: ChainFilterRepository,
     CR: ChainRepository,
+    F: FeeEstimator,
+    P: PrivateKeyProvider,
+    RR: RedeemRepository,
     SR: SwapRepository,
+    W: Wallet,
+{
+    pub chain_client: Arc<CC>,
+    pub chain_filter_repository: Arc<CF>,
+    pub chain_repository: Arc<CR>,
+    pub fee_estimator: Arc<F>,
+    pub network: Network,
+    pub redeem_service: Arc<RedeemService<CC, CR, RR, SR, P>>,
+    pub swap_repository: Arc<SR>,
+    pub token: CancellationToken,
+    pub wallet: Arc<W>,
+}
+
+#[derive(Debug)]
+pub struct Server<CC, CF, CR, F, P, RR, SR, W>
+where
+    CC: ChainClient,
+    CF: ChainFilterRepository,
+    CR: ChainRepository,
+    F: FeeEstimator,
+    P: PrivateKeyProvider,
+    RR: RedeemRepository,
+    SR: SwapRepository,
+    W: Wallet,
 {
     chain_client: Arc<CC>,
     chain_filter_repository: Arc<CF>,
     chain_repository: Arc<CR>,
+    fee_estimator: Arc<F>,
     network: Network,
-    redeem_service: Arc<RedeemService<CR, SR>>,
+    redeem_service: Arc<RedeemService<CC, CR, RR, SR, P>>,
     swap_repository: Arc<SR>,
     token: CancellationToken,
+    wallet: Arc<W>,
 }
 
-impl<CC, CF, CR, SR> Server<CC, CF, CR, SR>
+impl<CC, CF, CR, F, P, RR, SR, W> Server<CC, CF, CR, F, P, RR, SR, W>
 where
     CC: ChainClient,
-    CR: ChainRepository,
     CF: ChainFilterRepository,
+    CR: ChainRepository,
+    F: FeeEstimator,
+    P: PrivateKeyProvider,
+    RR: RedeemRepository,
     SR: SwapRepository,
+    W: Wallet,
 {
-    pub fn new(
-        network: Network,
-        chain_client: Arc<CC>,
-        chain_filter_repository: Arc<CF>,
-        chain_repository: Arc<CR>,
-        redeem_service: Arc<RedeemService<CR, SR>>,
-        swap_repository: Arc<SR>,
-        token: CancellationToken,
-    ) -> Self {
+    pub fn new(params: ServerParams<CC, CF, CR, F, P, RR, SR, W>) -> Self {
         Self {
-            network,
-            chain_client,
-            chain_filter_repository,
-            chain_repository,
-            redeem_service,
-            swap_repository,
-            token,
+            chain_client: params.chain_client,
+            chain_filter_repository: params.chain_filter_repository,
+            chain_repository: params.chain_repository,
+            fee_estimator: params.fee_estimator,
+            network: params.network,
+            redeem_service: params.redeem_service,
+            swap_repository: params.swap_repository,
+            token: params.token,
+            wallet: params.wallet,
         }
     }
 }
 
 #[tonic::async_trait]
-impl<CC, CF, CR, SR> SwapManager for Server<CC, CF, CR, SR>
+impl<CC, CF, CR, F, P, RR, SR, W> SwapManager for Server<CC, CF, CR, F, P, RR, SR, W>
 where
     CC: ChainClient + Send + Sync + 'static,
     CF: ChainFilterRepository + Send + Sync + 'static,
     CR: ChainRepository + Send + Sync + 'static,
+    F: FeeEstimator + Send + Sync + 'static,
+    P: PrivateKeyProvider + Send + Sync + 'static,
+    RR: RedeemRepository + Send + Sync + 'static,
     SR: SwapRepository + Send + Sync + 'static,
+    W: Wallet + Send + Sync + 'static,
 {
     #[instrument(skip(self), level = "debug")]
     async fn add_address_filters(
@@ -225,21 +258,81 @@ where
         Ok(Response::new(ListRedeemableReply {
             redeemables: redeemables
                 .into_iter()
-                .map(|redeemable| Redeemable {
-                    blocks_left: redeemable.blocks_left(current_height),
-                    lock_time: redeemable.swap.public.lock_time,
-                    swap_hash: redeemable.swap.public.hash.to_string(),
-                    utxos: redeemable
-                        .utxos
-                        .iter()
-                        .map(|utxo| RedeemableUtxo {
-                            confirmation_height: utxo.utxo.block_height,
-                            outpoint: utxo.utxo.outpoint.to_string(),
-                            paid_with_request: utxo.paid_with_request.clone(),
-                        })
-                        .collect(),
+                .map(|r| RedeemableUtxo {
+                    outpoint: r.utxo.outpoint.to_string(),
+                    swap_hash: r.swap.public.hash.to_string(),
+                    lock_time: r.swap.public.lock_time,
+                    confirmation_height: r.utxo.block_height,
+                    blocks_left: r.blocks_left(current_height),
+                    paid_with_request: r.paid_with_request,
                 })
                 .collect(),
+        }))
+    }
+
+    #[instrument(skip(self), level = "debug")]
+    async fn redeem(
+        &self,
+        request: Request<RedeemRequest>,
+    ) -> Result<Response<RedeemReply>, Status> {
+        let request = request.into_inner();
+        let all_redeemables = self.redeem_service.list_redeemable().await?;
+        let mut redeemables = Vec::new();
+        for outpoint in request.outpoints {
+            let outpoint: OutPoint = outpoint
+                .parse()
+                .map_err(|_| Status::invalid_argument(format!("invalid outpoint {}", outpoint)))?;
+            let redeemable = match all_redeemables.iter().find(|r| r.utxo.outpoint == outpoint) {
+                Some(redeemable) => redeemable,
+                None => {
+                    return Err(Status::invalid_argument(format!(
+                        "outpoint {} not found",
+                        outpoint
+                    )))
+                }
+            };
+            redeemables.push(redeemable.clone());
+        }
+
+        let current_height = self.chain_client.get_blockheight().await?;
+        let min_blocks_left = match redeemables
+            .iter()
+            .map(|r| r.blocks_left(current_height))
+            .min()
+        {
+            Some(m) => m,
+            None => return Err(Status::invalid_argument("no outpoints selected")),
+        };
+
+        let fee_estimate = match request.fee_per_kw {
+            Some(fee_per_kw) => FeeEstimate {
+                sat_per_kw: fee_per_kw,
+            },
+            None => self.fee_estimator.estimate_fee(min_blocks_left).await?,
+        };
+
+        let destination_address = match request.destination_address {
+            Some(a) => a
+                .parse::<Address<NetworkUnchecked>>()
+                .map_err(|e| Status::invalid_argument(e.to_string()))?
+                .require_network(self.network)
+                .map_err(|e| Status::invalid_argument(e.to_string()))?,
+            None => self.wallet.new_address().await?,
+        };
+
+        let tx = self
+            .redeem_service
+            .redeem(
+                &redeemables,
+                &fee_estimate,
+                current_height,
+                destination_address,
+                request.auto_bump,
+            )
+            .await?;
+        Ok(Response::new(RedeemReply {
+            tx_id: tx.txid().to_string(),
+            fee_per_kw: fee_estimate.sat_per_kw,
         }))
     }
 
@@ -252,6 +345,18 @@ where
 
 impl From<RedeemServiceError> for Status {
     fn from(value: RedeemServiceError) -> Self {
+        Status::internal(value.to_string())
+    }
+}
+
+impl From<WalletError> for Status {
+    fn from(value: WalletError) -> Self {
+        Status::internal(value.to_string())
+    }
+}
+
+impl From<RedeemError> for Status {
+    fn from(value: RedeemError) -> Self {
         Status::internal(value.to_string())
     }
 }

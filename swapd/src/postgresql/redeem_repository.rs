@@ -6,9 +6,9 @@ use std::{
 use bitcoin::{
     address::NetworkUnchecked,
     consensus::{Decodable, Encodable},
-    hashes::{sha256, Hash},
-    Address, Network, Transaction,
+    Address, Network, OutPoint, Transaction,
 };
+use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
 use tracing::instrument;
 
@@ -34,7 +34,7 @@ impl redeem::RedeemRepository for RedeemRepository {
         redeem.tx.consensus_encode(&mut tx)?;
         let mut db_tx = self.pool.begin().await?;
         sqlx::query(
-            r#"INSERT INTO redeems (tx_id, creation_time, tx, destination_address, fee_per_kw, swap_hash)
+            r#"INSERT INTO redeems (tx_id, creation_time, tx, destination_address, fee_per_kw, auto_bump)
                VALUES ($1, $2, $3, $4, $5, $6)"#,
         )
         .bind(&tx_id)
@@ -42,7 +42,7 @@ impl redeem::RedeemRepository for RedeemRepository {
         .bind(tx)
         .bind(redeem.destination_address.to_string())
         .bind(redeem.fee_per_kw as i64)
-        .bind(redeem.swap_hash.as_byte_array().to_vec())
+        .bind(redeem.auto_bump)
         .execute(&mut *db_tx)
         .await?;
 
@@ -73,47 +73,60 @@ impl redeem::RedeemRepository for RedeemRepository {
         Ok(())
     }
 
+    /// Get all redeems where the inputs haven't been spent yet.
     #[instrument(level = "trace", skip(self))]
-    async fn get_last_redeem(
+    async fn get_redeems(
         &self,
-        swap_hash: &sha256::Hash,
-    ) -> Result<Option<Redeem>, RedeemRepositoryError> {
-        let maybe_row = sqlx::query(
+        outpoints: &[OutPoint],
+    ) -> Result<Vec<Redeem>, RedeemRepositoryError> {
+        // TODO: Get all redeems that have not been confirmed and where the
+        // inputs haven't been spent yet.
+        // NOTE: This query violates the separation principle of separating
+        // chain and redeem logic.
+        let mut rows = sqlx::query(
             r#"SELECT r.creation_time
                ,      r.tx
                ,      r.destination_address
                ,      r.fee_per_kw
+               ,      r.auto_bump
                FROM redeems r
-               WHERE r.swap_hash = $1
-               ORDER BY r.creation_time DESC
-               LIMIT 1"#,
+               WHERE tx_id IN (
+                   SELECT ri.redeem_tx_id
+                   FROM redeem_inputs ri
+                   WHERE ri.tx_id NOT IN (
+                       SELECT ti.tx_id
+                       FROM tx_inputs ti
+                       INNER JOIN tx_blocks tb ON ti.spending_tx_id = tb.tx_id
+                       INNER JOIN blocks b ON tb.block_hash = b.block_hash
+                   )
+               )
+               ORDER BY r.fee_per_kw DESC, r.creation_time DESC"#,
         )
-        .bind(swap_hash.as_byte_array().to_vec())
-        .fetch_optional(&*self.pool)
-        .await?;
+        .fetch(&*self.pool);
 
-        let row = match maybe_row {
-            Some(row) => row,
-            None => return Ok(None),
-        };
+        let mut result = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let creation_time: i64 = row.try_get("creation_time")?;
+            let mut tx: &[u8] = row.try_get("tx")?;
+            let destination_address: String = row.try_get("destination_address")?;
+            let fee_per_kw: i64 = row.try_get("fee_per_kw")?;
+            let auto_bump: bool = row.try_get("auto_bump")?;
 
-        let creation_time: i64 = row.try_get("creation_time")?;
-        let mut tx: &[u8] = row.try_get("tx")?;
-        let destination_address: String = row.try_get("destination_address")?;
-        let fee_per_kw: i64 = row.try_get("fee_per_kw")?;
+            let creation_time = SystemTime::UNIX_EPOCH
+                .checked_add(Duration::from_secs(creation_time as u64))
+                .ok_or(RedeemRepositoryError::InvalidTimestamp)?;
+            result.push(Redeem {
+                creation_time,
+                destination_address: destination_address
+                    .parse::<Address<NetworkUnchecked>>()?
+                    .require_network(self.network)?,
+                fee_per_kw: fee_per_kw as u32,
+                tx: Transaction::consensus_decode(&mut tx)?,
+                auto_bump,
+            });
+        }
 
-        let creation_time = SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_secs(creation_time as u64))
-            .ok_or(RedeemRepositoryError::InvalidTimestamp)?;
-        Ok(Some(Redeem {
-            creation_time,
-            destination_address: destination_address
-                .parse::<Address<NetworkUnchecked>>()?
-                .require_network(self.network)?,
-            fee_per_kw: fee_per_kw as u32,
-            swap_hash: *swap_hash,
-            tx: Transaction::consensus_decode(&mut tx)?,
-        }))
+        Ok(result)
     }
 }
 

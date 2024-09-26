@@ -1,15 +1,15 @@
 use std::time::SystemTime;
 
-use bitcoin::{hashes::sha256, Address, Transaction};
+use bitcoin::{Address, OutPoint, Transaction};
 use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Redeem {
-    pub swap_hash: sha256::Hash,
     pub creation_time: SystemTime,
     pub tx: Transaction,
     pub destination_address: Address,
     pub fee_per_kw: u32,
+    pub auto_bump: bool,
 }
 
 #[derive(Debug, Error)]
@@ -23,8 +23,8 @@ pub enum RedeemRepositoryError {
 #[async_trait::async_trait]
 pub trait RedeemRepository {
     async fn add_redeem(&self, redeem: &Redeem) -> Result<(), RedeemRepositoryError>;
-    async fn get_last_redeem(
+    async fn get_redeems(
         &self,
-        swap_hash: &sha256::Hash,
-    ) -> Result<Option<Redeem>, RedeemRepositoryError>;
+        outpoints: &[OutPoint],
+    ) -> Result<Vec<Redeem>, RedeemRepositoryError>;
 }

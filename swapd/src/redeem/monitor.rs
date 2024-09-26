@@ -1,33 +1,39 @@
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::pin::Pin;
 use std::time::Duration;
-use std::{future::Future, pin::pin, sync::Arc, time::SystemTime};
+use std::{future::Future, pin::pin, sync::Arc};
 
+use bitcoin::OutPoint;
 use futures::future::{FusedFuture, FutureExt};
-use futures::{stream::FuturesUnordered, StreamExt};
-use thiserror::Error;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use tokio::join;
-use tracing::{debug, error, field, instrument, trace};
+use tracing::{debug, error, field, instrument};
 
 use crate::chain::BroadcastError;
+use crate::swap::RedeemableUtxo;
 use crate::{
     chain::{
         ChainClient, ChainError, ChainRepository, ChainRepositoryError, FeeEstimateError,
         FeeEstimator,
     },
-    swap::{CreateRedeemTxError, GetSwapsError, PrivateKeyProvider, SwapRepository, SwapService},
+    swap::{CreateRedeemTxError, GetSwapsError, PrivateKeyProvider, SwapRepository},
     wallet::{Wallet, WalletError},
 };
 
 use super::service::{RedeemService, RedeemServiceError};
-use super::Redeemable;
+use super::RedeemError;
 use super::{repository::RedeemRepository, Redeem, RedeemRepositoryError};
 
 const MIN_REPLACEMENT_DIFF_SAT_PER_KW: u32 = 250;
-
-#[derive(Debug, Error)]
-pub enum RedeemError {
-    #[error("{0}")]
-    General(Box<dyn std::error::Error + Sync + Send>),
-}
+type RedeemFut<'a> = Pin<
+    Box<
+        dyn Future<Output = (Result<(), RedeemError>, Option<Redeem>, Vec<RedeemableUtxo>)>
+            + Send
+            + 'a,
+    >,
+>;
 
 pub struct RedeemMonitorParams<CC, CR, FE, SR, P, RR, W>
 where
@@ -42,9 +48,8 @@ where
     pub chain_client: Arc<CC>,
     pub fee_estimator: Arc<FE>,
     pub poll_interval: Duration,
-    pub swap_service: Arc<SwapService<P>>,
     pub redeem_repository: Arc<RR>,
-    pub redeem_service: Arc<RedeemService<CR, SR>>,
+    pub redeem_service: Arc<RedeemService<CC, CR, RR, SR, P>>,
     pub wallet: Arc<W>,
 }
 
@@ -61,28 +66,26 @@ where
     chain_client: Arc<CC>,
     fee_estimator: Arc<FE>,
     poll_interval: Duration,
-    swap_service: Arc<SwapService<P>>,
     redeem_repository: Arc<RR>,
-    redeem_service: Arc<RedeemService<CR, SR>>,
+    redeem_service: Arc<RedeemService<CC, CR, RR, SR, P>>,
     wallet: Arc<W>,
 }
 
 impl<CC, CR, FE, SR, P, RR, W> RedeemMonitor<CC, CR, FE, SR, P, RR, W>
 where
-    CC: ChainClient,
-    CR: ChainRepository,
-    FE: FeeEstimator,
-    SR: SwapRepository,
-    P: PrivateKeyProvider,
-    RR: RedeemRepository,
-    W: Wallet,
+    CC: ChainClient + Send + Sync,
+    CR: ChainRepository + Send + Sync,
+    FE: FeeEstimator + Send + Sync,
+    SR: SwapRepository + Send + Sync,
+    P: PrivateKeyProvider + Send + Sync,
+    RR: RedeemRepository + Send + Sync,
+    W: Wallet + Send + Sync,
 {
     pub fn new(params: RedeemMonitorParams<CC, CR, FE, SR, P, RR, W>) -> Self {
         Self {
             chain_client: params.chain_client,
             fee_estimator: params.fee_estimator,
             poll_interval: params.poll_interval,
-            swap_service: params.swap_service,
             redeem_repository: params.redeem_repository,
             redeem_service: params.redeem_service,
             wallet: params.wallet,
@@ -116,18 +119,120 @@ where
 
     #[instrument(skip(self), level = "trace")]
     async fn do_sync(&self) -> Result<(), RedeemError> {
-        let redeemable_swaps = self.redeem_service.list_redeemable().await?;
         let current_height = self.chain_client.get_blockheight().await?;
+        let redeemables = self.redeem_service.list_redeemable().await?;
+        let redeemables: HashMap<_, _> = redeemables
+            .into_iter()
+            .map(|redeemable| (redeemable.utxo.outpoint, redeemable))
+            .collect();
+        let outpoints: Vec<_> = redeemables.keys().cloned().collect();
+        let mut redeems = self.redeem_repository.get_redeems(&outpoints).await?;
+        // Sort existing redeems by highest fee rate and then creation time.
+        // TODO: Let repository handle this sorting.
+        redeems.sort_by(|a, b| match b.fee_per_kw.cmp(&a.fee_per_kw) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => b.creation_time.cmp(&a.creation_time),
+            Ordering::Greater => Ordering::Greater,
+        });
 
-        let mut tasks = FuturesUnordered::new();
-        for redeemable_swap in redeemable_swaps {
-            tasks.push(self.redeem_swap(redeemable_swap, current_height))
+        // First remove all the outpoints where there is already an in-progress
+        // redeem transaction published. These in-progress redeem transactions
+        // will be rechecked for fees below.
+        let mut recheck_redeems = Vec::new();
+        let mut unhandled_outpoints: HashSet<OutPoint> = outpoints.iter().cloned().collect();
+        for redeem in redeems {
+            let outpoints: Vec<_> = redeem
+                .tx
+                .input
+                .iter()
+                .map(|input| input.previous_output)
+                .collect();
+            // Only process this redeem if it is still spending valid outputs.
+            if !outpoints
+                .iter()
+                .all(|outpoint| redeemables.contains_key(outpoint))
+            {
+                continue;
+            }
+
+            let mut current_redeemables: Vec<RedeemableUtxo> = Vec::new();
+            for outpoint in &outpoints {
+                unhandled_outpoints.remove(outpoint);
+                current_redeemables.push(
+                    redeemables
+                        .get(outpoint)
+                        .expect("missing expected redeemable utxo in map")
+                        .clone(),
+                );
+            }
+
+            recheck_redeems.push((redeem, current_redeemables));
         }
 
-        while let Some(result) = tasks.next().await {
-            if let Err(e) = result {
-                // TODO: Log which task it was somehow.
-                error!("redeem task errored with: {:?}", e);
+        // Now group the remaining utxos by swap. Note grouping by swap is
+        // pretty much an arbitrary decision. they might as well be grouped by
+        // remaining timelock to save on fees.
+        let mut swaps = HashMap::new();
+        for unhandled_outpoint in &unhandled_outpoints {
+            let redeemable = redeemables
+                .get(unhandled_outpoint)
+                .expect("missing expected redeemable utxo in map");
+
+            // Be a good citizen and don't redeem any funds that were not paid
+            // over lightning. That can happen if the user sends another onchain
+            // transaction to the same address multiple times. Users may not
+            // know this is unsafe for them to do.
+            if redeemable.paid_with_request.is_none() {
+                // TODO: Handle the case where the payment result was not
+                //       persisted.
+                continue;
+            }
+
+            let entry = swaps
+                .entry(redeemable.swap.public.hash)
+                .or_insert(Vec::new());
+            entry.push(redeemable.clone());
+        }
+
+        let mut futures: FuturesUnordered<RedeemFut> = FuturesUnordered::new();
+        for (redeem, redeemables) in recheck_redeems {
+            let fut = self.recheck_redeem(current_height, redeem.clone(), redeemables.clone());
+            futures.push(Box::pin(async move {
+                let res = fut.await;
+                (res, Some(redeem), redeemables)
+            }));
+        }
+
+        for (_, redeemables) in swaps {
+            let fut = self.redeem(current_height, redeemables.clone());
+
+            futures.push(Box::pin(async move {
+                let res = fut.await;
+                (res, None, redeemables)
+            }));
+        }
+
+        while let Some((res, redeem, redeemables)) = futures.next().await {
+            // TODO: Extract the reason for error, and come up with solutions
+            //       how to redo the redeeming another way.
+            if let Err(e) = res {
+                let redeemables = redeemables
+                    .iter()
+                    .map(|redeemable| redeemable.utxo.outpoint.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                match redeem {
+                    Some(redeem) => error!(
+                        "failed to recheck redeem '{}' for outpoints '{}': {:?}",
+                        redeem.tx.txid(),
+                        redeemables,
+                        e
+                    ),
+                    None => error!(
+                        "failed to create redeem for outpoints '{}': {:?}",
+                        redeemables, e
+                    ),
+                }
             }
         }
 
@@ -135,106 +240,92 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    async fn redeem_swap(
+    async fn recheck_redeem(
         &self,
-        redeemable: Redeemable,
         current_height: u64,
+        redeem: Redeem,
+        redeemables: Vec<RedeemableUtxo>,
     ) -> Result<(), RedeemError> {
-        // Only redeem utxos that were paid as part of an invoice payment. Users
-        // sometimes send funds to the same address multiple times, even though
-        // it is no longer safe to do so, because it's not obvious to a user
-        // a P2WSH address should not be reused. Be a good citizen and allow the
-        // user to refund those utxos. Note these utxos can still be redeemed
-        // manually by the swap server if needed.
-        let utxos: Vec<_> = redeemable
-            .utxos
+        let blocks_left = match redeemables
             .iter()
-            .filter(|utxo| utxo.paid_with_request.is_some())
-            .map(|utxo| &utxo.utxo)
-            .cloned()
-            .collect();
-        if utxos.is_empty() {
-            return Ok(());
+            .map(|r| r.blocks_left(current_height))
+            .min()
+        {
+            Some(blocks_left) => blocks_left,
+            None => return Err(RedeemError::General("blocks_left returned none".into())),
+        };
+        let fee_estimate = self.fee_estimator.estimate_fee(blocks_left).await?;
+
+        // If the feerate is still sufficient, rebroadcast the same transaction.
+        if redeem.fee_per_kw + MIN_REPLACEMENT_DIFF_SAT_PER_KW > fee_estimate.sat_per_kw {
+            return match self.chain_client.broadcast_tx(redeem.tx.clone()).await {
+                Ok(_) => {
+                    debug!("succesfully rebroadcast redeem tx '{}'", redeem.tx.txid());
+                    Ok(())
+                }
+                Err(e) => match e {
+                    BroadcastError::Chain(_) => Err(e.into()),
+                    BroadcastError::InsufficientFeeRejectingReplacement(_) => {
+                        debug!(
+                            "rebroadcast redeem tx '{}' returned expected error '{}'",
+                            redeem.tx.txid(),
+                            e
+                        );
+                        Ok(())
+                    }
+                    BroadcastError::UnknownError(_) => Err(e.into()),
+                },
+            };
         }
 
-        // NOTE: This unwrap only works because the utxos vec is not empty!
-        let min_conf_height = utxos.iter().map(|u| u.block_height).min().unwrap();
-
-        // Blocks left gives a sense of urgency for this redeem.
-        let blocks_left = (redeemable.swap.public.lock_time as i32)
-            - (current_height.saturating_sub(min_conf_height) as i32);
-        let fee_estimate_fut = self.fee_estimator.estimate_fee(blocks_left);
-        let last_redeem_fut = self
-            .redeem_repository
-            .get_last_redeem(&redeemable.swap.public.hash);
-        let (fee_estimate_res, last_redeem_res) = join!(fee_estimate_fut, last_redeem_fut);
-        let fee_estimate = fee_estimate_res?;
-        let destination_address = if let Some(last_redeem) = last_redeem_res? {
-            // if the previous fee rate is still sufficient and it spends the
-            // same utxos, attempt to rebroadcast the tx and return. Utxos can
-            // be different, for example if there has been a reorg in the meantime.
-            // Note that until cluster mempool is available, creating transactions
-            // with different input sets could lead to pinning ourselves. This
-            // should not happen most of the time, but it is a possibility.
-            let sorted_new: Vec<_> = utxos.iter().map(|utxo| utxo.outpoint).collect();
-            let sorted_old: Vec<_> = last_redeem
-                .tx
-                .input
-                .iter()
-                .map(|input| input.previous_output)
-                .collect();
-            if last_redeem.fee_per_kw + MIN_REPLACEMENT_DIFF_SAT_PER_KW > fee_estimate.sat_per_kw
-                && sorted_new == sorted_old
-            {
-                debug!(
-                    fee_per_kw = last_redeem.fee_per_kw,
-                    hash = field::display(redeemable.swap.public.hash),
-                    tx_id = field::display(last_redeem.tx.txid()),
-                    "rebroadcasting redeem tx"
-                );
-                if let Err(e) = self.chain_client.broadcast_tx(last_redeem.tx).await {
-                    match e {
-                        crate::chain::BroadcastError::InsufficientFeeRejectingReplacement(e) => {
-                            trace!(
-                                "got expected error for rebroadcast: 'insufficient fee, rejecting replacement {}'",
-                                e
-                            )
-                        }
-                        _ => return Err(e.into()),
-                    }
-                }
-                return Ok(());
-            }
-
-            // If not, replace with the same destination address.
-            last_redeem.destination_address
-        } else {
-            self.wallet.new_address().await?
-        };
-
-        let redeem_tx = self.swap_service.create_redeem_tx(
-            &redeemable.swap,
-            &utxos,
-            &fee_estimate,
-            current_height,
-            &redeemable.preimage,
-            destination_address.clone(),
-        )?;
+        // The fee rate is not sufficient, craft a replacement transaction.
+        let replacement = self
+            .redeem_service
+            .redeem(
+                &redeemables,
+                &fee_estimate,
+                current_height,
+                redeem.destination_address,
+                redeem.auto_bump,
+            )
+            .await?;
         debug!(
-            fee_per_kw = fee_estimate.sat_per_kw,
-            hash = field::display(redeemable.swap.public.hash),
-            tx_id = field::display(redeem_tx.txid()),
-            "broadcasting new redeem tx"
+            tx_id = field::display(replacement.txid()),
+            prev_tx_id = field::display(redeem.tx.txid()),
+            "broadcasted replacement redeem tx"
         );
-        self.chain_client.broadcast_tx(redeem_tx.clone()).await?;
-        self.redeem_repository
-            .add_redeem(&Redeem {
-                creation_time: SystemTime::now(),
+        Ok(())
+    }
+
+    #[instrument(skip(self), level = "trace")]
+    async fn redeem(
+        &self,
+        current_height: u64,
+        redeemables: Vec<RedeemableUtxo>,
+    ) -> Result<(), RedeemError> {
+        let blocks_left = match redeemables
+            .iter()
+            .map(|r| r.blocks_left(current_height))
+            .min()
+        {
+            Some(blocks_left) => blocks_left,
+            None => return Err(RedeemError::General("blocks_left returned none".into())),
+        };
+        let fee_estimate_fut = self.fee_estimator.estimate_fee(blocks_left);
+        let address_fut = self.wallet.new_address();
+        let (fee_estimate_res, address_res) = join!(fee_estimate_fut, address_fut);
+        let fee_estimate = fee_estimate_res?;
+        let destination_address = address_res?;
+
+        // Craft a redeem transaction
+        self.redeem_service
+            .redeem(
+                &redeemables,
+                &fee_estimate,
+                current_height,
                 destination_address,
-                fee_per_kw: fee_estimate.sat_per_kw,
-                tx: redeem_tx,
-                swap_hash: redeemable.swap.public.hash,
-            })
+                true,
+            )
             .await?;
         Ok(())
     }

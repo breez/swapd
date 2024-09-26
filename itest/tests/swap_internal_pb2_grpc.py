@@ -61,6 +61,12 @@ class SwapManagerStub(object):
             response_deserializer=swap__internal__pb2.ListRedeemableReply.FromString,
             _registered_method=True,
         )
+        self.Redeem = channel.unary_unary(
+            "/swap_internal.SwapManager/Redeem",
+            request_serializer=swap__internal__pb2.RedeemRequest.SerializeToString,
+            response_deserializer=swap__internal__pb2.RedeemReply.FromString,
+            _registered_method=True,
+        )
         self.Stop = channel.unary_unary(
             "/swap_internal.SwapManager/Stop",
             request_serializer=swap__internal__pb2.StopRequest.SerializeToString,
@@ -96,6 +102,12 @@ class SwapManagerServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def Redeem(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
     def Stop(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -124,6 +136,11 @@ def add_SwapManagerServicer_to_server(servicer, server):
             servicer.ListRedeemable,
             request_deserializer=swap__internal__pb2.ListRedeemableRequest.FromString,
             response_serializer=swap__internal__pb2.ListRedeemableReply.SerializeToString,
+        ),
+        "Redeem": grpc.unary_unary_rpc_method_handler(
+            servicer.Redeem,
+            request_deserializer=swap__internal__pb2.RedeemRequest.FromString,
+            response_serializer=swap__internal__pb2.RedeemReply.SerializeToString,
         ),
         "Stop": grpc.unary_unary_rpc_method_handler(
             servicer.Stop,
@@ -253,6 +270,36 @@ class SwapManager(object):
             "/swap_internal.SwapManager/ListRedeemable",
             swap__internal__pb2.ListRedeemableRequest.SerializeToString,
             swap__internal__pb2.ListRedeemableReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def Redeem(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/swap_internal.SwapManager/Redeem",
+            swap__internal__pb2.RedeemRequest.SerializeToString,
+            swap__internal__pb2.RedeemReply.FromString,
             options,
             channel_credentials,
             insecure,

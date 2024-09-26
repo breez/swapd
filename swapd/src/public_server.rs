@@ -19,7 +19,7 @@ use crate::{
     chain_filter::ChainFilterService,
     lightning::{LightningClient, LightningError, PaymentRequest},
     public_server::swap_api::AddressStatus,
-    swap::PaymentAttempt,
+    swap::{PaymentAttempt, RedeemableUtxo},
 };
 
 use crate::swap::{
@@ -371,11 +371,17 @@ where
         // If the redeem tx can be created, this is a valid swap.
         self.swap_service
             .create_redeem_tx(
-                &swap_state.swap,
-                &utxos,
+                &utxos
+                    .iter()
+                    .map(|utxo| RedeemableUtxo {
+                        swap: swap_state.swap.clone(),
+                        utxo: utxo.clone(),
+                        paid_with_request: None,
+                        preimage: FAKE_PREIMAGE,
+                    })
+                    .collect::<Vec<_>>(),
                 &fee_estimate,
                 current_height,
-                &FAKE_PREIMAGE,
                 fake_address,
             )
             .map_err(|e| {

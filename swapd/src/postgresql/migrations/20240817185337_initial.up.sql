@@ -49,8 +49,8 @@ ON payment_attempt_tx_outputs (tx_id, output_index);
     chain
 */
 CREATE TABLE blocks (
-    block_hash varchar PRIMARY KEY,
-    prev_block_hash varchar NOT NULL,
+    block_hash VARCHAR PRIMARY KEY,
+    prev_block_hash VARCHAR NOT NULL,
     height BIGINT NOT NULL
 );
 
@@ -108,13 +108,13 @@ CREATE TABLE filter_addresses (
 CREATE TABLE redeems (
     tx_id VARCHAR NOT NULL PRIMARY KEY,
     creation_time BIGINT NOT NULL,
-    tx bytea NOT NULL,
+    tx BYTEA NOT NULL,
     destination_address VARCHAR NOT NULL,
     fee_per_kw BIGINT NOT NULL,
-    swap_hash BYTEA NOT NULL
+    auto_bump BOOLEAN NOT NULL
 );
 
-CREATE INDEX redeems_swap_hash_creation_time ON redeems(swap_hash, creation_time);
+CREATE INDEX redeems_swap_hash_creation_time ON redeems(creation_time);
 
 CREATE TABLE redeem_inputs (
     redeem_tx_id VARCHAR NOT NULL REFERENCES redeems,
