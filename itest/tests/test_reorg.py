@@ -1,22 +1,4 @@
-from binascii import hexlify
-from bitcoin.wallet import CBitcoinSecret
-from pyln.testing.fixtures import (
-    bitcoind,
-    directory,
-    db_provider,
-    executor,
-    jsonschemas,
-    node_cls,
-    node_factory,
-    setup_logging,
-    teardown_checks,
-    test_base_dir,
-    test_name,
-)
-from pyln.testing.utils import wait_for
-from fixtures import whatthefee, swapd_factory, postgres_factory
-import hashlib
-import os
+from helpers import *
 
 
 def test_reorg(node_factory, swapd_factory):
@@ -24,22 +6,14 @@ def test_reorg(node_factory, swapd_factory):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
     bitcoin = swapper.lightning_node.bitcoin
-    expected_outputs = len(swapper.lightning_node.rpc.listfunds()["outputs"]) + 1
-    user_node_id = user.info["id"]
-    secret_key = CBitcoinSecret.from_secret_bytes(os.urandom(32))
-    public_key = secret_key.pub
-    preimage = os.urandom(32)
-    h = hashlib.sha256(preimage).digest()
-    add_fund_resp = swapper.rpc.add_fund_init(user, public_key, h)
+    address, _, _ = add_fund_init(user, swapper)
 
     # Send funds to the address and confirm the tx
-    txid = user.bitcoin.rpc.sendtoaddress(add_fund_resp.address, 100_000 / 10**8)
+    txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     bitcoin.generate_block(1)
 
     # Ensure the swap transaction is picked up by swapd.
-    wait_for(
-        lambda: len(swapper.internal_rpc.get_swap(add_fund_resp.address).outputs) > 0
-    )
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
 
     fee_delta = 1000000
     orig_len = bitcoin.rpc.getblockcount()
@@ -61,9 +35,7 @@ def test_reorg(node_factory, swapd_factory):
     bitcoin.wait_for_log(r"UpdateTip: new best=.* height={}".format(orig_len + 1))
 
     # The swap should now (soon) no longer contain the no longer confirmed tx.
-    wait_for(
-        lambda: len(swapper.internal_rpc.get_swap(add_fund_resp.address).outputs) == 0
-    )
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) == 0)
 
     for txid in memp:
         # restore priority so they are mined
@@ -73,6 +45,4 @@ def test_reorg(node_factory, swapd_factory):
     bitcoin.generate_block(1)
 
     # Ensure the swapper picks it up.
-    wait_for(
-        lambda: len(swapper.internal_rpc.get_swap(add_fund_resp.address).outputs) > 0
-    )
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
