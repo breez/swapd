@@ -14,7 +14,7 @@ from pyln.testing.fixtures import (
     test_name,
 )
 from decimal import Decimal
-from pyln.testing.utils import wait_for
+from pyln.testing.utils import wait_for, SLOW_MACHINE
 from fixtures import whatthefee, swapd_factory, postgres_factory
 import hashlib
 import os
@@ -25,9 +25,13 @@ def test_redeem_rbf_close_to_deadline(node_factory, swapd_factory):
 
     # slow down the redeem poll interval, so the replacement transaction is not
     # mined during the creation of new blocks.
+    interval = "4"
+    if SLOW_MACHINE:
+        interval = "20"
+
     swapper = swapd_factory.get_swapd(
         options={
-            "redeem-poll-interval-seconds": "4",
+            "redeem-poll-interval-seconds": interval,
         }
     )
     swapper.lightning_node.openchannel(user, 1000000)
