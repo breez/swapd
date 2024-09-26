@@ -7,7 +7,7 @@ use reqwest::Url;
 use serde::Deserialize;
 use thiserror::Error;
 use tokio::{sync::Mutex, time::MissedTickBehavior};
-use tracing::error;
+use tracing::{error, field, trace};
 
 use crate::chain::{FeeEstimate, FeeEstimateError, FeeEstimator};
 
@@ -31,6 +31,7 @@ pub struct WhatTheFeeEstimator {
     url: Url,
     lock_time: u32,
     last_response: Arc<Mutex<Option<LastResponse>>>,
+    poll_interval: Duration,
 }
 
 #[derive(Debug, Error)]
@@ -40,11 +41,12 @@ pub enum WhatTheFeeError {
 }
 
 impl WhatTheFeeEstimator {
-    pub fn new(url: Url, lock_time: u32) -> Self {
+    pub fn new(url: Url, lock_time: u32, poll_interval: Duration) -> Self {
         Self {
             url,
             lock_time,
             last_response: Arc::new(Mutex::new(None)),
+            poll_interval,
         }
     }
 
@@ -58,8 +60,9 @@ impl WhatTheFeeEstimator {
     fn run_forever(&self) {
         let last_response = Arc::clone(&self.last_response);
         let url = self.url.clone();
+        let poll_interval = self.poll_interval;
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval = tokio::time::interval(poll_interval);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;
@@ -157,6 +160,10 @@ async fn get_fees(url: &Url) -> Result<LastResponse, WhatTheFeeError> {
         .await?
         .json::<WhatTheFeeResponse>()
         .await?;
+    trace!(
+        response = field::debug(&response),
+        "got whatthefee response"
+    );
     Ok(LastResponse {
         response,
         timestamp: now,

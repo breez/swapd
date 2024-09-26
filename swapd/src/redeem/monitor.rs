@@ -99,10 +99,10 @@ where
         }
 
         loop {
-            debug!("starting chain sync task");
-            match self.do_sync().await {
-                Ok(_) => debug!("chain sync task completed succesfully"),
-                Err(e) => error!("chain sync task failed with: {:?}", e),
+            debug!("starting redeem task");
+            match self.do_redeem().await {
+                Ok(_) => debug!("redeem task completed succesfully"),
+                Err(e) => error!("redeem task failed with: {:?}", e),
             }
 
             tokio::select! {
@@ -118,7 +118,7 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    async fn do_sync(&self) -> Result<(), RedeemError> {
+    async fn do_redeem(&self) -> Result<(), RedeemError> {
         let current_height = self.chain_client.get_blockheight().await?;
         let redeemables = self.redeem_service.list_redeemable().await?;
         let redeemables: HashMap<_, _> = redeemables

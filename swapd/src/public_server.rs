@@ -426,6 +426,12 @@ where
             })
             .await?;
 
+        debug!(
+            label = field::display(&label),
+            hash = field::display(hash),
+            "successfully paid"
+        );
+
         // Persist the preimage right away. There's also a background service
         // checking for preimages, in case the `pay` call failed, but the
         // payment did succeed.

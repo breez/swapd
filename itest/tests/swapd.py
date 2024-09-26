@@ -31,6 +31,7 @@ SWAPD_CONFIG = OrderedDict(
         "chain-poll-interval-seconds": "1",
         "redeem-poll-interval-seconds": "1",
         "preimage-poll-interval-seconds": "1",
+        "whatthefee-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
         "lock-time": "288",
         "min-confirmations": "1",
@@ -257,7 +258,7 @@ class SwapdServer(object):
             return self.rc
 
     def restart(self, timeout=10, clean=True):
-        """Stop and restart the lightning node.
+        """Stop and restart the swapd node.
 
         Keyword arguments:
         timeout: number of seconds to wait for a shutdown
@@ -430,6 +431,7 @@ class WhatTheFee(object):
         self.app.add_url_rule("/", "API entrypoint", self.get_fees, methods=["GET"])
         self.port = port
         self.request_count = 0
+        self.quotient = 1
 
     def get_fees(self):
         self.request_count += 1
@@ -440,7 +442,13 @@ class WhatTheFee(object):
             response.status_code = 500
             return response
 
-        fees = request.args.get("fees")
+        # multiply the caller fees by the quotient.
+        fees = ",".join(
+            map(
+                lambda x: str(int(x) * self.quotient),
+                request.args.get("fees").split(","),
+            )
+        )
         content = (
             '{"index": [3, 6, 9, 12, 18, 24, 36, 48, 72, 96, 144], '
             '"columns": ["0.0500", "0.2000", "0.5000", "0.8000", "0.9500"], '
@@ -476,3 +484,6 @@ class WhatTheFee(object):
                 self.request_count
             )
         )
+
+    def magnify(self, quotient=2):
+        self.quotient = quotient

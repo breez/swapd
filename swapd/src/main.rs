@@ -140,6 +140,10 @@ struct Args {
     #[arg(long, default_value = "60")]
     pub preimage_poll_interval_seconds: u64,
 
+    /// Polling interval between checking whatthefee.io fees.
+    #[arg(long, default_value = "60")]
+    pub whatthefee_poll_interval_seconds: u64,
+
     /// Automatically apply migrations to the database.
     #[arg(long)]
     pub auto_migrate: bool,
@@ -206,7 +210,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&chain_client),
         Arc::clone(&chain_filter_repository),
     ));
-    let fee_estimator_1 = WhatTheFeeEstimator::new(args.whatthefee_url, args.lock_time);
+    let fee_estimator_1 = WhatTheFeeEstimator::new(
+        args.whatthefee_url,
+        args.lock_time,
+        Duration::from_secs(args.whatthefee_poll_interval_seconds),
+    );
     fee_estimator_1.start().await?;
     let fee_estimator_2 = bitcoind::FeeEstimator::new(Arc::clone(&chain_client));
     let fee_estimator = Arc::new(FallbackFeeEstimator::new(fee_estimator_1, fee_estimator_2));
