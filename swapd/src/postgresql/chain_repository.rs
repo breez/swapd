@@ -134,7 +134,7 @@ impl chain::ChainRepository for ChainRepository {
         self.add_utxos(&mut tx, tx_outputs).await?;
 
         // NOTE: This also marks outputs as spent that were added in the current
-        // transaction (as long as the default transaction isolation level is 
+        // transaction (as long as the default transaction isolation level is
         // not 'read uncommitted', which would be strange)
         self.mark_spent(&mut tx, tx_inputs).await?;
 

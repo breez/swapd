@@ -217,15 +217,12 @@ where
                     .join(",");
                 match redeem {
                     Some(redeem) => error!(
-                        "failed to recheck redeem '{}' for outpoints '{}': {:?}",
-                        redeem.tx.txid(),
-                        redeemables,
+                        tx_id = field::display(redeem.tx.txid()),
+                        outpoints = redeemables,
+                        "failed to recheck redeem: {:?}",
                         e
                     ),
-                    None => error!(
-                        "failed to create redeem for outpoints '{}': {:?}",
-                        redeemables, e
-                    ),
+                    None => error!(outpoints = redeemables, "failed to create redeem: {:?}", e),
                 }
             }
         }
