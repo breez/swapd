@@ -57,7 +57,7 @@ where
 
             tokio::select! {
                 _ = &mut sig => {
-                    debug!("chain monitor shutting down");
+                    debug!("preimage monitor shutting down");
                     break;
                 }
                 _ = tokio::time::sleep(self.poll_interval) => {}
