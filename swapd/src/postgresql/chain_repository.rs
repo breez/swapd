@@ -110,7 +110,6 @@ impl ChainRepository {
     }
 }
 
-// TODO: Ensure when the block is detached, 'things' are no longer returned in queries.
 #[async_trait::async_trait]
 impl chain::ChainRepository for ChainRepository {
     #[instrument(level = "trace", skip(self))]
@@ -134,8 +133,9 @@ impl chain::ChainRepository for ChainRepository {
 
         self.add_utxos(&mut tx, tx_outputs).await?;
 
-        // TODO: Ensure the transaction isolation level picks up on the newly
-        // added utxos above too.
+        // NOTE: This also marks outputs as spent that were added in the current
+        // transaction (as long as the default transaction isolation level is 
+        // not 'read uncommitted', which would be strange)
         self.mark_spent(&mut tx, tx_inputs).await?;
 
         // correlate the transactions to the blocks
@@ -330,6 +330,8 @@ impl chain::ChainRepository for ChainRepository {
             WHERE address = $1 AND NOT EXISTS (
                 SELECT 1 
                 FROM tx_inputs i
+                INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
+                INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
                 WHERE o.tx_id = i.tx_id 
                     AND o.output_index = i.output_index)
             ORDER BY b.height, o.tx_id, o.output_index"#,
@@ -373,6 +375,8 @@ impl chain::ChainRepository for ChainRepository {
             INNER JOIN blocks b ON tb.block_hash = b.block_hash
             WHERE address = ANY($1) AND NOT EXISTS (SELECT 1 
                 FROM tx_inputs i
+                INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
+                INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
                 WHERE o.tx_id = i.tx_id 
                     AND o.output_index = i.output_index)
             ORDER BY o.address, b.height, o.tx_id, o.output_index"#,
