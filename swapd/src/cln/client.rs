@@ -68,7 +68,7 @@ impl LightningClient for Client {
     #[instrument(level = "trace", skip(self))]
     async fn get_preimage(
         &self,
-        hash: &sha256::Hash,
+        hash: sha256::Hash,
     ) -> Result<Option<PreimageResult>, LightningError> {
         let mut client = self.get_client().await?;
         let resp = client

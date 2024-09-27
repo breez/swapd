@@ -81,14 +81,11 @@ where
 
         let mut futures = FuturesUnordered::new();
         for hash in hashes {
-            let lightning_client = Arc::clone(&self.lightning_client);
-            let fut = async move {
-                lightning_client
-                    .get_preimage(&hash.clone())
-                    .map(|val| (hash, val))
-                    .await
-            };
-            futures.push(fut);
+            let fut = self.lightning_client.get_preimage(hash);
+            futures.push(async move {
+                let result = fut.await;
+                (hash, result)
+            });
         }
 
         while let Some((hash, result)) = futures.next().await {

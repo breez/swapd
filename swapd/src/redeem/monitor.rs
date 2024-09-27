@@ -141,7 +141,7 @@ where
                 .iter()
                 .map(|input| input.previous_output)
                 .collect();
-            // Only process this redeem if it is still spending valid outputs.
+            // Only reprocess this redeem if it is still spending valid outputs.
             if !outpoints
                 .iter()
                 .all(|outpoint| redeemables.contains_key(outpoint))

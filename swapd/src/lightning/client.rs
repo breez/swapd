@@ -31,7 +31,7 @@ pub struct PreimageResult {
 pub trait LightningClient {
     async fn get_preimage(
         &self,
-        hash: &sha256::Hash,
+        hash: sha256::Hash,
     ) -> Result<Option<PreimageResult>, LightningError>;
     async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, LightningError>;
 }
