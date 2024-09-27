@@ -342,10 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             let res = Server::builder()
                 .add_service(swapper_server)
-                .serve_with_shutdown(args.address, async {
-                    server_token.cancelled().await;
-                    info!("swapper server shutting down");
-                })
+                .serve_with_shutdown(args.address, server_token.cancelled())
                 .await;
             match res {
                 Ok(_) => info!("swapper server exited"),
@@ -376,10 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             let res = Server::builder()
                 .add_service(internal_server)
-                .serve_with_shutdown(args.internal_address, async {
-                    internal_server_token.cancelled().await;
-                    info!("internal server shutting down");
-                })
+                .serve_with_shutdown(args.internal_address, internal_server_token.cancelled())
                 .await;
             match res {
                 Ok(_) => info!("internal server exited"),
