@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, field, instrument, trace, warn};
+use tracing::{debug, error, field, info, instrument, trace, warn};
 
 use crate::{
     chain::{
@@ -150,6 +150,11 @@ where
             .await?;
         self.swap_repository.add_swap(&swap).await?;
 
+        info!(
+            hash = field::display(&hash),
+            address = field::display(&swap.public.address),
+            "new swap created"
+        );
         Ok(Response::new(AddFundInitReply {
             address: swap.public.address.to_string(),
             error_message: String::default(),
@@ -426,9 +431,10 @@ where
             })
             .await?;
 
-        debug!(
+        info!(
             label = field::display(&label),
             hash = field::display(hash),
+            address = field::display(swap_state.swap.public.address),
             "successfully paid"
         );
 
