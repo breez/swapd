@@ -270,7 +270,6 @@ impl chain::ChainRepository for ChainRepository {
 
     #[instrument(level = "trace", skip(self))]
     async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError> {
-        // TODO: Should tx_inputs also be filtered on whether they're in a block??
         let mut rows = sqlx::query(
             r#"SELECT o.address
                ,      o.tx_id
@@ -283,6 +282,8 @@ impl chain::ChainRepository for ChainRepository {
                INNER JOIN blocks b ON tb.block_hash = b.block_hash
                WHERE NOT EXISTS (SELECT 1 
                                  FROM tx_inputs i
+                                 INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
+                                 INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
                                  WHERE o.tx_id = i.tx_id 
                                     AND o.output_index = i.output_index)
                ORDER BY o.address, b.height, o.tx_id, o.output_index"#,
