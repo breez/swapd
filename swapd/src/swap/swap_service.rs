@@ -17,7 +17,6 @@ use crate::chain::{FeeEstimate, Utxo};
 
 use super::privkey_provider::PrivateKeyProvider;
 
-// TODO: Verify this size
 const REDEEM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
 
 #[derive(Clone, Debug)]
@@ -253,8 +252,6 @@ where
         }
 
         tx.input = inputs;
-        // TODO: Verify weight and fee are correct.
-
         Ok(tx)
     }
 }

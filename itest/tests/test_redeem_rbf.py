@@ -46,6 +46,7 @@ def test_redeem_rbf_close_to_deadline(node_factory, swapd_factory):
         memp = swapper.lightning_node.bitcoin.rpc.getrawmempool()
         if len(memp) == 0:
             return False
+        assert len(memp) == 1
         return memp[0] != redeem_txid1
 
     wait_for(check_bumped)
@@ -96,6 +97,7 @@ def test_redeem_rbf_new_feerate(node_factory, swapd_factory):
         memp = swapper.lightning_node.bitcoin.rpc.getrawmempool()
         if len(memp) == 0:
             return False
+        assert len(memp) == 1
         return memp[0] != redeem_txid1
 
     wait_for(check_bumped)

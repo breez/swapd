@@ -37,12 +37,11 @@ where
     async fn should_filter_utxo(&self, utxo: Utxo) -> Result<bool, Box<dyn std::error::Error>> {
         let sender_addresses = self
             .chain_client
-            .get_sender_addresses(&vec![utxo.outpoint])
+            .get_sender_addresses(&[utxo.outpoint])
             .await?;
-        Ok(self
-            .repository
+        self.repository
             .has_filtered_address(&sender_addresses)
-            .await?)
+            .await
     }
 }
 
