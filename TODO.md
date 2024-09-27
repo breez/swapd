@@ -1,2 +1,1 @@
-- [ ] resync the chain in the background periodically
 - [ ] let chainservice monitor redeem transactions
