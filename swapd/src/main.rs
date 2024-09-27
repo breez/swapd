@@ -246,10 +246,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&swap_repository),
         Arc::clone(&swap_service),
     ));
+
     let token = CancellationToken::new();
-
     let signal_token = token.clone();
-
     let tracker = TaskTracker::new();
 
     tokio::spawn(async move {
@@ -311,20 +310,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if !args.no_chain {
         let chain_monitor_token = token.clone();
-        let chain_monitor = ChainMonitor::new(
+        let chain_monitor = Arc::new(ChainMonitor::new(
             args.network,
             Arc::clone(&chain_client),
             Arc::clone(&chain_repository),
             Duration::from_secs(args.chain_poll_interval_seconds),
-        );
+        ));
         tracker.spawn(async move {
             info!("Starting chain monitor");
-            let res = chain_monitor
-                .start(async {
-                    chain_monitor_token.cancelled().await;
-                    info!("chain monitor shutting down");
-                })
-                .await;
+            let res = chain_monitor.start(chain_monitor_token.child_token()).await;
             match res {
                 Ok(_) => info!("chain monitor exited"),
                 Err(e) => info!("chain monitor exited with {:?}", e),

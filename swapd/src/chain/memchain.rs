@@ -55,8 +55,12 @@ impl Chain {
         Ok(())
     }
 
-    pub(super) fn base(&self) -> BlockHash {
-        self.base
+    pub(super) fn base(&self) -> BlockHeader {
+        self.blocks
+            .get(&self.base)
+            .expect("chain does not contain its own base")
+            .header
+            .clone()
     }
 
     pub(super) fn contains_block(&self, hash: &BlockHash) -> bool {
@@ -149,8 +153,12 @@ impl Chain {
         BackwardChainIterator::new(self)
     }
 
-    pub(super) fn tip(&self) -> BlockHash {
-        self.tip
+    pub(super) fn tip(&self) -> BlockHeader {
+        self.blocks
+            .get(&self.tip)
+            .expect("chain does not contain its own tip")
+            .header
+            .clone()
     }
 }
 
@@ -275,8 +283,8 @@ mod tests {
     fn test_new_has_tip_base_and_block() {
         let header = header(1);
         let chain = Chain::new(header.clone());
-        assert_eq!(chain.base(), header.hash);
-        assert_eq!(chain.tip(), header.hash);
+        assert_eq!(chain.base().hash, header.hash);
+        assert_eq!(chain.tip().hash, header.hash);
         assert!(chain.contains_block(&header.hash));
         assert_eq!(chain.get_block(&header.hash).unwrap(), header);
     }
@@ -287,8 +295,8 @@ mod tests {
         let new_tip = header(2);
         let mut chain = Chain::new(base.clone());
         chain.append(new_tip.clone()).unwrap();
-        assert_eq!(chain.tip(), new_tip.hash);
-        assert_eq!(chain.base(), base.hash);
+        assert_eq!(chain.tip().hash, new_tip.hash);
+        assert_eq!(chain.base().hash, base.hash);
         assert_eq!(chain.get_block(&new_tip.hash).unwrap(), new_tip);
     }
 
@@ -307,8 +315,8 @@ mod tests {
         let new_base = header(1);
         let mut chain = Chain::new(tip.clone());
         chain.prepend(new_base.clone()).unwrap();
-        assert_eq!(chain.tip(), tip.hash);
-        assert_eq!(chain.base(), new_base.hash);
+        assert_eq!(chain.tip().hash, tip.hash);
+        assert_eq!(chain.base().hash, new_base.hash);
         assert_eq!(chain.get_block(&new_base.hash).unwrap(), new_base);
     }
 

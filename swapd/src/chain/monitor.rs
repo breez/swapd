@@ -1,8 +1,8 @@
-use std::{collections::HashMap, future::Future, pin::pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bitcoin::{block::Bip34Error, Address, Block, Network, OutPoint};
-use futures::future::{FusedFuture, FutureExt};
-use tracing::debug;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tracing::{debug, error};
 
 use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Utxo};
 
@@ -17,12 +17,13 @@ where
     chain_client: Arc<C>,
     chain_repository: Arc<R>,
     poll_interval: Duration,
+    full_sync_interval: Duration,
 }
 
 impl<C, R> ChainMonitor<C, R>
 where
-    C: ChainClient,
-    R: ChainRepository,
+    C: ChainClient + Sync + Send + 'static,
+    R: ChainRepository + Sync + Send + 'static,
 {
     pub fn new(
         network: Network,
@@ -35,12 +36,13 @@ where
             network,
             chain_repository,
             poll_interval,
+            full_sync_interval: Duration::from_secs(60 * 60 * 24),
         }
     }
 
-    pub async fn start<F: Future<Output = ()>>(&self, signal: F) -> Result<(), ChainError> {
+    pub async fn start(self: Arc<Self>, token: CancellationToken) -> Result<(), ChainError> {
         let blocks = self.chain_repository.get_block_headers().await?;
-        let mut chain = match Chain::try_from(blocks) {
+        let chain = match Chain::try_from(blocks) {
             Ok(chain) => chain,
             Err(e) => match e {
                 ChainError::EmptyChain => {
@@ -63,17 +65,72 @@ where
             },
         };
 
-        let mut sig = pin!(signal.fuse());
-        if sig.is_terminated() {
-            return Ok(());
-        }
+        let birthday_chain = Chain::new(chain.base());
+        let tracker = TaskTracker::new();
+        let self1 = Arc::clone(&self);
+        let self2 = Arc::clone(&self);
+        let token1 = token.clone();
+        let token2 = token.clone();
+        tracker.spawn(async move {
+            if let Err(e) = self1.start_tip_sync(chain, token1.child_token()).await {
+                error!("chain tip sync exited with error: {:?}", e);
+            }
+            token1.cancel();
+        });
+        tracker.spawn(async move {
+            if let Err(e) = self2
+                .start_full_sync(birthday_chain, token2.child_token())
+                .await
+            {
+                error!("chain full sync exited with error: {:?}", e);
+            }
+            token2.cancel();
+        });
+        tracker.wait().await;
 
+        Ok(())
+    }
+
+    async fn start_full_sync(
+        &self,
+        birthday_chain: Chain,
+        token: CancellationToken,
+    ) -> Result<(), ChainError> {
         loop {
-            self.do_sync(&mut chain).await?;
+            if token.is_cancelled() {
+                return Ok(());
+            }
+
+            let mut chain = birthday_chain.clone();
+            self.do_sync(&mut chain, token.child_token()).await?;
 
             tokio::select! {
-                _ = &mut sig => {
-                    debug!("chain monitor shutting down");
+                _ = token.cancelled() => {
+                    debug!("chain monitor full sync shutting down");
+                    break;
+                }
+                _ = tokio::time::sleep(self.full_sync_interval) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn start_tip_sync(
+        &self,
+        mut chain: Chain,
+        token: CancellationToken,
+    ) -> Result<(), ChainError> {
+        loop {
+            if token.is_cancelled() {
+                return Ok(());
+            }
+
+            self.do_sync(&mut chain, token.child_token()).await?;
+
+            tokio::select! {
+                _ = token.cancelled() => {
+                    debug!("chain monitor tip sync shutting down");
                     break;
                 }
                 _ = tokio::time::sleep(self.poll_interval) => {}
@@ -83,18 +140,29 @@ where
         Ok(())
     }
 
-    async fn do_sync(&self, existing_chain: &mut Chain) -> Result<(), ChainError>
+    async fn do_sync(
+        &self,
+        existing_chain: &mut Chain,
+        token: CancellationToken,
+    ) -> Result<(), ChainError>
     where
         C: ChainClient,
         R: ChainRepository,
     {
-        debug!("chain sync starting");
+        debug!(
+            "chain sync starting from block {}",
+            existing_chain.tip().hash
+        );
         let tip_hash = self.chain_client.get_tip_hash().await?;
         let mut current_header = self.chain_client.get_block_header(&tip_hash).await?;
         let mut new_chain = Chain::new(current_header.clone());
 
         // Iterate backwards from the tip to get the missed block headers.
         loop {
+            if token.is_cancelled() {
+                return Ok(());
+            }
+
             debug!(
                 "got block header {}, height {}",
                 current_header.hash, current_header.height
@@ -115,11 +183,15 @@ where
         // If the base and tip don't match, there was a reorg.
         debug!(
             "block headers caught up. new chain base: {}, existing chain tip: {}",
-            new_chain.base(),
-            existing_chain.tip()
+            new_chain.base().hash,
+            existing_chain.tip().hash
         );
         if new_chain.base() != existing_chain.tip() {
             for reorg_block in existing_chain.iter_backwards() {
+                if token.is_cancelled() {
+                    return Ok(());
+                }
+
                 if new_chain.contains_block(&reorg_block.hash) {
                     break;
                 }
@@ -135,6 +207,10 @@ where
         // Iterate forward from the last known block to the tip to process blocks.
         // Note that this always re-processes the last known block.
         for current_block in new_chain.iter_forwards() {
+            if token.is_cancelled() {
+                return Ok(());
+            }
+
             debug!(
                 "processing block {}, height {}",
                 current_block.hash, current_block.height
