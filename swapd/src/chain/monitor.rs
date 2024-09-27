@@ -47,7 +47,7 @@ where
                     // If the chain is empty, set the birthday to 20 blocks ago.
                     let tip_hash = self.chain_client.get_tip_hash().await?;
                     let mut birthday_header = self.chain_client.get_block_header(&tip_hash).await?;
-                    for _n in 1..21 {
+                    for _n in 0..20 {
                         birthday_header = self
                             .chain_client
                             .get_block_header(&birthday_header.prev)
