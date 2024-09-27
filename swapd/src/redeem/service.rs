@@ -130,11 +130,14 @@ where
         self.redeem_repository
             .add_redeem(&Redeem {
                 creation_time: SystemTime::now(),
-                destination_address,
+                destination_address: destination_address.clone(),
                 fee_per_kw: fee_estimate.sat_per_kw,
                 tx: tx.clone(),
                 auto_bump,
             })
+            .await?;
+        self.chain_repository
+            .add_watch_address(&destination_address)
             .await?;
         Ok(tx)
     }
