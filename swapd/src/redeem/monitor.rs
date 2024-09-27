@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::time::Duration;
-use std::{future::Future, pin::pin, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use bitcoin::OutPoint;
-use futures::future::{FusedFuture, FutureExt};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tokio::join;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, field, instrument};
 
 use crate::chain::BroadcastError;
@@ -91,13 +91,12 @@ where
         }
     }
 
-    pub async fn start<F: Future<Output = ()>>(&self, signal: F) -> Result<(), RedeemError> {
-        let mut sig = pin!(signal.fuse());
-        if sig.is_terminated() {
-            return Ok(());
-        }
-
+    pub async fn start(&self, token: CancellationToken) -> Result<(), RedeemError> {
         loop {
+            if token.is_cancelled() {
+                return Ok(());
+            }
+
             debug!("starting redeem task");
             match self.do_redeem().await {
                 Ok(_) => debug!("redeem task completed succesfully"),
@@ -105,7 +104,7 @@ where
             }
 
             tokio::select! {
-                _ = &mut sig => {
+                _ = token.cancelled() => {
                     debug!("redeem monitor shutting down");
                     break;
                 }

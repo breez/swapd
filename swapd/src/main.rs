@@ -273,10 +273,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracker.spawn(async move {
             info!("Starting redeem monitor");
             let res = redeem_monitor
-                .start(async {
-                    redeem_monitor_token.cancelled().await;
-                    info!("redeem monitor shutting down");
-                })
+                .start(redeem_monitor_token.child_token())
                 .await;
             match res {
                 Ok(_) => info!("redeem monitor exited"),
@@ -296,10 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracker.spawn(async move {
             info!("Starting preimage monitor");
             let res = preimage_monitor
-                .start(async {
-                    preimage_monitor_token.cancelled().await;
-                    info!("preimage monitor shutting down");
-                })
+                .start(preimage_monitor_token.child_token())
                 .await;
             match res {
                 Ok(_) => info!("preimage monitor exited"),

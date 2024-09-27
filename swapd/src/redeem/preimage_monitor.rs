@@ -1,6 +1,7 @@
-use std::{future::Future, pin::pin, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
-use futures::{future::FusedFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{stream::FuturesUnordered, StreamExt};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 use crate::{
@@ -41,22 +42,18 @@ where
         }
     }
 
-    pub async fn start<F: Future<Output = ()>>(
-        &self,
-        signal: F,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut sig = pin!(signal.fuse());
-        if sig.is_terminated() {
-            return Ok(());
-        }
-
+    pub async fn start(&self, token: CancellationToken) -> Result<(), Box<dyn std::error::Error>> {
         loop {
+            if token.is_cancelled() {
+                return Ok(());
+            }
+
             if let Err(e) = self.do_query_preimages().await {
                 error!("failed to query preimages: {:?}", e);
             }
 
             tokio::select! {
-                _ = &mut sig => {
+                _ = token.cancelled() => {
                     debug!("preimage monitor shutting down");
                     break;
                 }
