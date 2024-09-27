@@ -126,14 +126,9 @@ where
             .map(|redeemable| (redeemable.utxo.outpoint, redeemable))
             .collect();
         let outpoints: Vec<_> = redeemables.keys().cloned().collect();
-        let mut redeems = self.redeem_repository.get_redeems(&outpoints).await?;
-        // Sort existing redeems by highest fee rate and then creation time.
-        // TODO: Let repository handle this sorting.
-        redeems.sort_by(|a, b| match b.fee_per_kw.cmp(&a.fee_per_kw) {
-            Ordering::Less => Ordering::Less,
-            Ordering::Equal => b.creation_time.cmp(&a.creation_time),
-            Ordering::Greater => Ordering::Greater,
-        });
+
+        // Get existing redeems, sorted by highest fee rate and then creation time.
+        let redeems = self.redeem_repository.get_redeems(&outpoints).await?;
 
         // First remove all the outpoints where there is already an in-progress
         // redeem transaction published. These in-progress redeem transactions

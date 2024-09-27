@@ -127,12 +127,11 @@ where
     ) -> Result<Response<AddFundInitReply>, Status> {
         debug!("add_fund_init request");
         let req = request.into_inner();
-        // TODO: Return this error in error message?
+        // TODO: Return errors in this function in error message rather than status?
         let payer_pubkey = PublicKey::from_slice(&req.pubkey).map_err(|_| {
             trace!("got invalid pubkey");
             Status::invalid_argument("invalid pubkey")
         })?;
-        // TODO: Return this error in error message?
         let hash = Hash::from_slice(&req.hash).map_err(|_| {
             trace!("got invalid hash");
             Status::invalid_argument("invalid hash")
@@ -336,7 +335,7 @@ where
             .collect::<Vec<Utxo>>();
 
         // TODO: Filter utxos on sync?
-        let utxos = match self.chain_filter_service.filter_utxos(&utxos).await {
+        let utxos = match self.chain_filter_service.filter_utxos(utxos.clone()).await {
             Ok(utxos) => utxos,
             Err(e) => {
                 error!("failed to filter utxos: {:?}", e);

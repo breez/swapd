@@ -23,6 +23,9 @@ pub enum RedeemRepositoryError {
 #[async_trait::async_trait]
 pub trait RedeemRepository {
     async fn add_redeem(&self, redeem: &Redeem) -> Result<(), RedeemRepositoryError>;
+
+    /// Get all redeems where the inputs haven't been spent yet, sorted by fee
+    /// rate desc, then creation time desc.
     async fn get_redeems(
         &self,
         outpoints: &[OutPoint],

@@ -73,14 +73,13 @@ impl redeem::RedeemRepository for RedeemRepository {
         Ok(())
     }
 
-    /// Get all redeems where the inputs haven't been spent yet.
+    /// Get all redeems where the inputs haven't been spent yet, sorted by fee
+    /// rate desc, then creation time desc.
     #[instrument(level = "trace", skip(self))]
     async fn get_redeems(
         &self,
         outpoints: &[OutPoint],
     ) -> Result<Vec<Redeem>, RedeemRepositoryError> {
-        // TODO: Get all redeems that have not been confirmed and where the
-        // inputs haven't been spent yet.
         // NOTE: This query violates the separation principle of separating
         // chain and redeem logic.
         let mut rows = sqlx::query(

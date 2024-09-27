@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bitcoin::OutPoint;
+use futures::{stream::FuturesUnordered, StreamExt};
 
 use crate::chain::{ChainClient, Utxo};
 
@@ -8,7 +8,8 @@ use super::ChainFilterRepository;
 
 #[async_trait::async_trait]
 pub trait ChainFilterService {
-    async fn filter_utxos(&self, utxos: &[Utxo]) -> Result<Vec<Utxo>, Box<dyn std::error::Error>>;
+    async fn filter_utxos(&self, utxos: Vec<Utxo>)
+        -> Result<Vec<Utxo>, Box<dyn std::error::Error>>;
 }
 
 #[derive(Debug)]
@@ -32,6 +33,17 @@ where
             repository,
         }
     }
+
+    async fn should_filter_utxo(&self, utxo: Utxo) -> Result<bool, Box<dyn std::error::Error>> {
+        let sender_addresses = self
+            .chain_client
+            .get_sender_addresses(&vec![utxo.outpoint])
+            .await?;
+        Ok(self
+            .repository
+            .has_filtered_address(&sender_addresses)
+            .await?)
+    }
 }
 
 #[async_trait::async_trait]
@@ -40,19 +52,26 @@ where
     C: ChainClient + Send + Sync,
     R: ChainFilterRepository + Send + Sync,
 {
-    async fn filter_utxos(&self, utxos: &[Utxo]) -> Result<Vec<Utxo>, Box<dyn std::error::Error>> {
-        let outpoints: Vec<OutPoint> = utxos.iter().map(|u| u.outpoint).collect();
-        let sender_addresses = self.chain_client.get_sender_addresses(&outpoints).await?;
+    async fn filter_utxos(
+        &self,
+        utxos: Vec<Utxo>,
+    ) -> Result<Vec<Utxo>, Box<dyn std::error::Error>> {
+        let mut futures = FuturesUnordered::new();
+        for utxo in utxos {
+            let fut = self.should_filter_utxo(utxo.clone());
+            futures.push(async {
+                let should_filter_res = fut.await;
+                (utxo, should_filter_res)
+            })
+        }
 
-        // TODO: Actually filter each individual utxo.
-        let utxos = match self
-            .repository
-            .has_filtered_address(&sender_addresses)
-            .await?
-        {
-            true => Vec::new(),
-            false => utxos.to_vec(),
-        };
-        Ok(utxos)
+        let mut result = Vec::new();
+        while let Some((utxo, should_filter_res)) = futures.next().await {
+            if should_filter_res? {
+                continue;
+            }
+            result.push(utxo);
+        }
+        Ok(result)
     }
 }
