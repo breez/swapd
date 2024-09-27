@@ -151,6 +151,26 @@ struct Args {
     /// Url to whatthefee.io.
     #[arg(long, default_value = "https://whatthefee.io/data.json")]
     pub whatthefee_url: Url,
+
+    /// If this flag is set, the redeem logic will not run in this process. It
+    /// should then be run separately.
+    #[arg(long)]
+    pub no_redeem: bool,
+
+    /// If this flag is set, the chain sync will not run in this process. It
+    /// should then be run separately.
+    #[arg(long)]
+    pub no_chain: bool,
+
+    /// If this flag is set, the preimage monitor will not run in this process.
+    /// It should then be run separately.
+    #[arg(long)]
+    pub no_preimage: bool,
+
+    /// If this flag is set, the servers will not run in this process. They
+    /// should then be run separately.
+    #[arg(long)]
+    pub no_servers: bool,
 }
 
 #[tokio::main]
@@ -218,19 +238,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     fee_estimator_1.start().await?;
     let fee_estimator_2 = bitcoind::FeeEstimator::new(Arc::clone(&chain_client));
     let fee_estimator = Arc::new(FallbackFeeEstimator::new(fee_estimator_1, fee_estimator_2));
-    let swapper_server = SwapperServer::new(SwapServer::new(SwapServerParams {
-        network: args.network,
-        max_swap_amount_sat: args.max_swap_amount_sat,
-        min_confirmations: args.min_confirmations,
-        min_redeem_blocks: args.min_redeem_blocks,
-        chain_service: Arc::clone(&chain_client),
-        chain_filter_service: Arc::clone(&chain_filter),
-        chain_repository: Arc::clone(&chain_repository),
-        lightning_client: Arc::clone(&cln_client),
-        swap_service: Arc::clone(&swap_service),
-        swap_repository: Arc::clone(&swap_repository),
-        fee_estimator: Arc::clone(&fee_estimator),
-    }));
 
     let redeem_service = Arc::new(RedeemService::new(
         Arc::clone(&chain_client),
@@ -240,45 +247,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&swap_service),
     ));
     let token = CancellationToken::new();
-    let internal_server = SwapManagerServer::new(internal_server::Server::new(
-        internal_server::ServerParams {
-            chain_client: Arc::clone(&chain_client),
-            chain_filter_repository: Arc::clone(&chain_filter_repository),
-            chain_repository: Arc::clone(&chain_repository),
-            fee_estimator: Arc::clone(&fee_estimator),
-            swap_repository: Arc::clone(&swap_repository),
-            wallet: Arc::clone(&cln_client),
-            network: args.network,
-            redeem_service: Arc::clone(&redeem_service),
-            token: token.clone(),
-        },
-    ));
-    let chain_monitor = ChainMonitor::new(
-        args.network,
-        Arc::clone(&chain_client),
-        Arc::clone(&chain_repository),
-        Duration::from_secs(args.chain_poll_interval_seconds),
-    );
-    let redeem_monitor = RedeemMonitor::new(RedeemMonitorParams {
-        chain_client: Arc::clone(&chain_client),
-        fee_estimator: Arc::clone(&fee_estimator),
-        poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
-        redeem_repository: Arc::clone(&redeem_repository),
-        redeem_service: Arc::clone(&redeem_service),
-        wallet: Arc::clone(&cln_client),
-    });
-    let preimage_monitor = PreimageMonitor::new(
-        Arc::clone(&chain_repository),
-        Arc::clone(&cln_client),
-        Duration::from_secs(args.preimage_poll_interval_seconds),
-        Arc::clone(&swap_repository),
-    );
 
-    let server_token = token.clone();
-    let internal_server_token = token.clone();
-    let chain_monitor_token = token.clone();
-    let redeem_monitor_token = token.clone();
-    let preimage_monitor_token = token.clone();
+    let signal_token = token.clone();
+
     let tracker = TaskTracker::new();
 
     tokio::spawn(async move {
@@ -288,87 +259,147 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 warn!("Unable to listen for shutdown signal: {}", err);
             }
         }
-        token.cancel();
+        signal_token.cancel();
     });
-    tracker.spawn(async move {
-        info!("Starting redeem monitor");
-        let res = redeem_monitor
-            .start(async {
-                redeem_monitor_token.cancelled().await;
-                info!("redeem monitor shutting down");
-            })
-            .await;
-        match res {
-            Ok(_) => info!("redeem monitor exited"),
-            Err(e) => info!("redeem monitor exited with {:?}", e),
-        };
-        redeem_monitor_token.cancel();
-    });
-    tracker.spawn(async move {
-        info!("Starting preimage monitor");
-        let res = preimage_monitor
-            .start(async {
-                preimage_monitor_token.cancelled().await;
-                info!("preimage monitor shutting down");
-            })
-            .await;
-        match res {
-            Ok(_) => info!("preimage monitor exited"),
-            Err(e) => info!("preimage monitor exited with {:?}", e),
-        };
-        preimage_monitor_token.cancel();
-    });
-    tracker.spawn(async move {
-        info!("Starting chain monitor");
-        let res = chain_monitor
-            .start(async {
-                chain_monitor_token.cancelled().await;
-                info!("chain monitor shutting down");
-            })
-            .await;
-        match res {
-            Ok(_) => info!("chain monitor exited"),
-            Err(e) => info!("chain monitor exited with {:?}", e),
-        };
-        chain_monitor_token.cancel();
-    });
-    tracker.spawn(async move {
-        info!(
-            address = field::display(&args.address),
-            "Starting swapper server"
+    if !args.no_redeem {
+        let redeem_monitor_token = token.clone();
+        let redeem_monitor = RedeemMonitor::new(RedeemMonitorParams {
+            chain_client: Arc::clone(&chain_client),
+            fee_estimator: Arc::clone(&fee_estimator),
+            poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
+            redeem_repository: Arc::clone(&redeem_repository),
+            redeem_service: Arc::clone(&redeem_service),
+            wallet: Arc::clone(&cln_client),
+        });
+        tracker.spawn(async move {
+            info!("Starting redeem monitor");
+            let res = redeem_monitor
+                .start(async {
+                    redeem_monitor_token.cancelled().await;
+                    info!("redeem monitor shutting down");
+                })
+                .await;
+            match res {
+                Ok(_) => info!("redeem monitor exited"),
+                Err(e) => info!("redeem monitor exited with {:?}", e),
+            };
+            redeem_monitor_token.cancel();
+        });
+    }
+    if !args.no_preimage {
+        let preimage_monitor_token = token.clone();
+        let preimage_monitor = PreimageMonitor::new(
+            Arc::clone(&chain_repository),
+            Arc::clone(&cln_client),
+            Duration::from_secs(args.preimage_poll_interval_seconds),
+            Arc::clone(&swap_repository),
         );
-        let res = Server::builder()
-            .add_service(swapper_server)
-            .serve_with_shutdown(args.address, async {
-                server_token.cancelled().await;
-                info!("swapper server shutting down");
-            })
-            .await;
-        match res {
-            Ok(_) => info!("swapper server exited"),
-            Err(e) => info!("swapper server exited with {:?}", e),
-        }
+        tracker.spawn(async move {
+            info!("Starting preimage monitor");
+            let res = preimage_monitor
+                .start(async {
+                    preimage_monitor_token.cancelled().await;
+                    info!("preimage monitor shutting down");
+                })
+                .await;
+            match res {
+                Ok(_) => info!("preimage monitor exited"),
+                Err(e) => info!("preimage monitor exited with {:?}", e),
+            };
+            preimage_monitor_token.cancel();
+        });
+    }
+    if !args.no_chain {
+        let chain_monitor_token = token.clone();
+        let chain_monitor = ChainMonitor::new(
+            args.network,
+            Arc::clone(&chain_client),
+            Arc::clone(&chain_repository),
+            Duration::from_secs(args.chain_poll_interval_seconds),
+        );
+        tracker.spawn(async move {
+            info!("Starting chain monitor");
+            let res = chain_monitor
+                .start(async {
+                    chain_monitor_token.cancelled().await;
+                    info!("chain monitor shutting down");
+                })
+                .await;
+            match res {
+                Ok(_) => info!("chain monitor exited"),
+                Err(e) => info!("chain monitor exited with {:?}", e),
+            };
+            chain_monitor_token.cancel();
+        });
+    }
+    if !args.no_servers {
+        let server_token = token.clone();
+        let swapper_server = SwapperServer::new(SwapServer::new(SwapServerParams {
+            network: args.network,
+            max_swap_amount_sat: args.max_swap_amount_sat,
+            min_confirmations: args.min_confirmations,
+            min_redeem_blocks: args.min_redeem_blocks,
+            chain_service: Arc::clone(&chain_client),
+            chain_filter_service: Arc::clone(&chain_filter),
+            chain_repository: Arc::clone(&chain_repository),
+            lightning_client: Arc::clone(&cln_client),
+            swap_service: Arc::clone(&swap_service),
+            swap_repository: Arc::clone(&swap_repository),
+            fee_estimator: Arc::clone(&fee_estimator),
+        }));
+        tracker.spawn(async move {
+            info!(
+                address = field::display(&args.address),
+                "Starting swapper server"
+            );
+            let res = Server::builder()
+                .add_service(swapper_server)
+                .serve_with_shutdown(args.address, async {
+                    server_token.cancelled().await;
+                    info!("swapper server shutting down");
+                })
+                .await;
+            match res {
+                Ok(_) => info!("swapper server exited"),
+                Err(e) => info!("swapper server exited with {:?}", e),
+            }
 
-        server_token.cancel();
-    });
-    tracker.spawn(async move {
-        info!(
-            address = field::display(&args.internal_address),
-            "Starting internal server"
-        );
-        let res = Server::builder()
-            .add_service(internal_server)
-            .serve_with_shutdown(args.internal_address, async {
-                internal_server_token.cancelled().await;
-                info!("internal server shutting down");
-            })
-            .await;
-        match res {
-            Ok(_) => info!("internal server exited"),
-            Err(e) => info!("internal server exited with {:?}", e),
-        }
-        internal_server_token.cancel();
-    });
+            server_token.cancel();
+        });
+
+        let internal_server_token = token.clone();
+        let internal_server = SwapManagerServer::new(internal_server::Server::new(
+            internal_server::ServerParams {
+                chain_client: Arc::clone(&chain_client),
+                chain_filter_repository: Arc::clone(&chain_filter_repository),
+                chain_repository: Arc::clone(&chain_repository),
+                fee_estimator: Arc::clone(&fee_estimator),
+                swap_repository: Arc::clone(&swap_repository),
+                wallet: Arc::clone(&cln_client),
+                network: args.network,
+                redeem_service: Arc::clone(&redeem_service),
+                token: token.clone(),
+            },
+        ));
+        tracker.spawn(async move {
+            info!(
+                address = field::display(&args.internal_address),
+                "Starting internal server"
+            );
+            let res = Server::builder()
+                .add_service(internal_server)
+                .serve_with_shutdown(args.internal_address, async {
+                    internal_server_token.cancelled().await;
+                    info!("internal server shutting down");
+                })
+                .await;
+            match res {
+                Ok(_) => info!("internal server exited"),
+                Err(e) => info!("internal server exited with {:?}", e),
+            }
+            internal_server_token.cancel();
+        });
+    }
 
     info!("swapd started");
     tracker.wait().await;
