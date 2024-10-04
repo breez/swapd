@@ -12,15 +12,19 @@ In order to install `swapd` you have to compile from source.
 
 ### Prerequisites
 - [Rust](https://www.rust-lang.org/tools/install) installation
-- Core lightning >= **v24.08**.
+- `protoc` installation
 
 ### Compilation
 Run `make release` in the root folder of this repository. The binaries will be
 `target/release/swapd` and `target/release/swap-cli`.
 
 ## Running
-swapd needs cln, bitcoind and postgres to run. See `swapd --help` for
-configuration parameters.
+In order to run `swapd` the following need to be installed.
+- Core lightning >= **v24.08**, accessible over grpc
+- bitcoind, accessible with rpc
+- postgres
+
+See `swapd --help` for configuration parameters.
 
 ## Testing
 To run all tests call `make test`, or `PYTEST_PAR=10 make test -j12`.
