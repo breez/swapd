@@ -10,14 +10,14 @@ use bitcoin::{
     Address, Network, OutPoint, PrivateKey, PublicKey, ScriptBuf,
 };
 use futures::TryStreamExt;
-use sqlx::{PgPool, Row};
+use sqlx::{postgres::PgRow, PgPool, Row};
 use tracing::instrument;
 
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapError, GetSwapsError, PaidOutpoint,
-        PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, PaidOutpoint, PaymentAttempt,
+        Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
         SwapStatePaidOutpoints,
     },
 };
@@ -31,6 +31,50 @@ pub struct SwapRepository {
 impl SwapRepository {
     pub fn new(pool: Arc<PgPool>, network: Network) -> Self {
         Self { pool, network }
+    }
+
+    fn map_swap_state(&self, row: &PgRow) -> Result<SwapState, GetSwapsError> {
+        let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
+        let creation_time: i64 = row.try_get("creation_time")?;
+        let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
+        let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
+        let script: Vec<u8> = row.try_get("script")?;
+        let address: &str = row.try_get("address")?;
+        let lock_time: i64 = row.try_get("lock_time")?;
+        let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
+
+        let creation_time = SystemTime::UNIX_EPOCH
+            .checked_add(Duration::from_secs(creation_time as u64))
+            .ok_or(GetSwapsError::General("invalid timestamp".into()))?;
+        let address = address
+            .parse::<Address<NetworkUnchecked>>()?
+            .require_network(self.network)?;
+        let swap = Swap {
+            creation_time,
+            public: SwapPublicData {
+                address: address.clone(),
+                hash: sha256::Hash::from_slice(&payment_hash)?,
+                lock_time: lock_time as u32,
+                payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
+                swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
+                script: ScriptBuf::from_bytes(script),
+            },
+            private: SwapPrivateData {
+                swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
+            },
+        };
+        let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
+        Ok(SwapState {
+            swap,
+            preimage: match preimage {
+                Some(preimage) => Some(
+                    preimage
+                        .try_into()
+                        .map_err(|_| GetSwapsError::InvalidPreimage)?,
+                ),
+                None => None,
+            },
+        })
     }
 }
 
@@ -153,203 +197,71 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError> {
-        let maybe_row = sqlx::query(
-            r#"SELECT s.creation_time
-               ,      s.payer_pubkey
-               ,      s.swapper_pubkey
-               ,      s.script
-               ,      s.address
-               ,      s.lock_time
-               ,      s.swapper_privkey
-               ,      s.preimage
+    async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapsError> {
+        let maybe_row = sqlx::query(&format!(
+            r#"SELECT {}
                FROM swaps s
                WHERE s.payment_hash = $1"#,
-        )
+            swap_state_fields("s")
+        ))
         .bind(hash.as_byte_array().to_vec())
         .fetch_optional(&*self.pool)
         .await?;
 
         let row = match maybe_row {
             Some(row) => row,
-            None => return Err(GetSwapError::NotFound),
+            None => return Err(GetSwapsError::NotFound),
         };
 
-        let creation_time: i64 = row.try_get("creation_time")?;
-        let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-        let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-        let script: Vec<u8> = row.try_get("script")?;
-        let address: &str = row.try_get("address")?;
-        let lock_time: i64 = row.try_get("lock_time")?;
-        let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
-        let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
-
-        let creation_time = SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_secs(creation_time as u64))
-            .ok_or(GetSwapError::General("invalid timestamp".into()))?;
-        let swap = Swap {
-            creation_time,
-            public: SwapPublicData {
-                address: address
-                    .parse::<Address<NetworkUnchecked>>()?
-                    .require_network(self.network)?,
-                hash: *hash,
-                lock_time: lock_time as u32,
-                payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                script: ScriptBuf::from_bytes(script),
-            },
-            private: SwapPrivateData {
-                swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
-            },
-        };
-
-        Ok(SwapState {
-            swap,
-            preimage: match preimage {
-                Some(preimage) => Some(
-                    preimage
-                        .try_into()
-                        .map_err(|_| GetSwapError::InvalidPreimage)?,
-                ),
-                None => None,
-            },
-        })
+        let swap_state = self.map_swap_state(&row)?;
+        Ok(swap_state)
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapError> {
-        let maybe_row = sqlx::query(
-            r#"SELECT s.payment_hash
-               ,      s.creation_time
-               ,      s.payer_pubkey
-               ,      s.swapper_pubkey
-               ,      s.script
-               ,      s.lock_time
-               ,      s.swapper_privkey
-               ,      s.preimage
+    async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapsError> {
+        let maybe_row = sqlx::query(&format!(
+            r#"SELECT {}
                FROM swaps s
                WHERE s.address = $1"#,
-        )
+            swap_state_fields("s"),
+        ))
         .bind(address.to_string())
         .fetch_optional(&*self.pool)
         .await?;
 
         let row = match maybe_row {
             Some(row) => row,
-            None => return Err(GetSwapError::NotFound),
+            None => return Err(GetSwapsError::NotFound),
         };
 
-        let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
-        let creation_time: i64 = row.try_get("creation_time")?;
-        let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-        let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-        let script: Vec<u8> = row.try_get("script")?;
-        let lock_time: i64 = row.try_get("lock_time")?;
-        let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
-        let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
-
-        let creation_time = SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_secs(creation_time as u64))
-            .ok_or(GetSwapError::General("invalid timestamp".into()))?;
-        let swap = Swap {
-            creation_time,
-            public: SwapPublicData {
-                address: address.clone(),
-                hash: sha256::Hash::from_slice(&payment_hash)?,
-                lock_time: lock_time as u32,
-                payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                script: ScriptBuf::from_bytes(script),
-            },
-            private: SwapPrivateData {
-                swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
-            },
-        };
-
-        Ok(SwapState {
-            swap,
-            preimage: match preimage {
-                Some(preimage) => Some(
-                    preimage
-                        .try_into()
-                        .map_err(|_| GetSwapError::InvalidPreimage)?,
-                ),
-                None => None,
-            },
-        })
+        let swap_state = self.map_swap_state(&row)?;
+        Ok(swap_state)
     }
 
     #[instrument(level = "trace", skip(self))]
     async fn get_swap_by_payment_request(
         &self,
         payment_request: &str,
-    ) -> Result<SwapState, GetSwapError> {
-        let maybe_row = sqlx::query(
-            r#"SELECT s.payment_hash
-               ,      s.creation_time
-               ,      s.payer_pubkey
-               ,      s.swapper_pubkey
-               ,      s.script
-               ,      s.address
-               ,      s.lock_time
-               ,      s.swapper_privkey
-               ,      s.preimage
+    ) -> Result<SwapState, GetSwapsError> {
+        let maybe_row = sqlx::query(&format!(
+            r#"SELECT {}
                FROM swaps s
                INNER JOIN payment_attempts p ON s.payment_hash = p.swap_payment_hash
                WHERE p.payment_request = $1
                LIMIT 1"#,
-        )
+            swap_state_fields("s")
+        ))
         .bind(payment_request)
         .fetch_optional(&*self.pool)
         .await?;
 
         let row = match maybe_row {
             Some(row) => row,
-            None => return Err(GetSwapError::NotFound),
+            None => return Err(GetSwapsError::NotFound),
         };
 
-        let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
-        let creation_time: i64 = row.try_get("creation_time")?;
-        let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-        let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-        let script: Vec<u8> = row.try_get("script")?;
-        let address: &str = row.try_get("address")?;
-        let lock_time: i64 = row.try_get("lock_time")?;
-        let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
-        let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
-
-        let creation_time = SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_secs(creation_time as u64))
-            .ok_or(GetSwapError::General("invalid timestamp".into()))?;
-        let swap = Swap {
-            creation_time,
-            public: SwapPublicData {
-                address: address
-                    .parse::<Address<NetworkUnchecked>>()?
-                    .require_network(self.network)?,
-                hash: sha256::Hash::from_slice(&payment_hash)?,
-                lock_time: lock_time as u32,
-                payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                script: ScriptBuf::from_bytes(script),
-            },
-            private: SwapPrivateData {
-                swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
-            },
-        };
-
-        Ok(SwapState {
-            swap,
-            preimage: match preimage {
-                Some(preimage) => Some(
-                    preimage
-                        .try_into()
-                        .map_err(|_| GetSwapError::InvalidPreimage)?,
-                ),
-                None => None,
-            },
-        })
+        let swap_state = self.map_swap_state(&row)?;
+        Ok(swap_state)
     }
 
     #[instrument(level = "trace", skip(self))]
@@ -358,69 +270,18 @@ impl crate::swap::SwapRepository for SwapRepository {
         addresses: &[Address],
     ) -> Result<HashMap<Address, SwapState>, GetSwapsError> {
         let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
-        let mut rows = sqlx::query(
-            r#"SELECT s.creation_time
-               ,      s.payment_hash
-               ,      s.payer_pubkey
-               ,      s.swapper_pubkey
-               ,      s.script
-               ,      s.address
-               ,      s.lock_time
-               ,      s.swapper_privkey
-               ,      s.preimage
+        let query = format!(
+            r#"SELECT {}
                FROM swaps s
                WHERE s.address = ANY($1)"#,
-        )
-        .bind(addresses)
-        .fetch(&*self.pool);
+            swap_state_fields("s")
+        );
+        let mut rows = sqlx::query(&query).bind(addresses).fetch(&*self.pool);
 
         let mut result = HashMap::new();
         while let Some(row) = rows.try_next().await? {
-            let creation_time: i64 = row.try_get("creation_time")?;
-            let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
-            let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-            let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-            let script: Vec<u8> = row.try_get("script")?;
-            let address: &str = row.try_get("address")?;
-            let lock_time: i64 = row.try_get("lock_time")?;
-            let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
-            let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
-
-            let creation_time = SystemTime::UNIX_EPOCH
-                .checked_add(Duration::from_secs(creation_time as u64))
-                .ok_or(GetSwapsError::General("invalid timestamp".into()))?;
-            let address = address
-                .parse::<Address<NetworkUnchecked>>()?
-                .require_network(self.network)?;
-            let swap = Swap {
-                creation_time,
-                public: SwapPublicData {
-                    address: address.clone(),
-                    hash: sha256::Hash::from_slice(&payment_hash)?,
-                    lock_time: lock_time as u32,
-                    payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                    swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                    script: ScriptBuf::from_bytes(script),
-                },
-                private: SwapPrivateData {
-                    swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
-                },
-            };
-
-            result.insert(
-                address,
-                SwapState {
-                    swap,
-                    preimage: match preimage {
-                        Some(preimage) => Some(
-                            preimage
-                                .try_into()
-                                .map_err(|_| GetSwapsError::InvalidPreimage)?,
-                        ),
-                        None => None,
-                    },
-                },
-            );
+            let swap_state = self.map_swap_state(&row)?;
+            result.insert(swap_state.swap.public.address.clone(), swap_state);
         }
 
         Ok(result)
@@ -432,16 +293,8 @@ impl crate::swap::SwapRepository for SwapRepository {
         addresses: &[Address],
     ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError> {
         let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
-        let mut rows = sqlx::query(
-            r#"SELECT s.creation_time
-               ,      s.payment_hash
-               ,      s.payer_pubkey
-               ,      s.swapper_pubkey
-               ,      s.script
-               ,      s.address
-               ,      s.lock_time
-               ,      s.swapper_privkey
-               ,      s.preimage
+        let query = format!(
+            r#"SELECT {}
                ,      po.payment_request
                ,      po.tx_id
                ,      po.output_index
@@ -458,9 +311,9 @@ impl crate::swap::SwapRepository for SwapRepository {
                ) po ON s.payment_hash = po.payment_hash
                WHERE s.address = ANY($1)
                ORDER BY s.payment_hash"#,
-        )
-        .bind(addresses)
-        .fetch(&*self.pool);
+            swap_state_fields("s")
+        );
+        let mut rows = sqlx::query(&query).bind(addresses).fetch(&*self.pool);
 
         let mut result = HashMap::new();
         while let Some(row) = rows.try_next().await? {
@@ -469,48 +322,12 @@ impl crate::swap::SwapRepository for SwapRepository {
                 .parse::<Address<NetworkUnchecked>>()?
                 .require_network(self.network)?;
             if !result.contains_key(&address) {
-                let creation_time: i64 = row.try_get("creation_time")?;
-                let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
-                let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-                let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-                let script: Vec<u8> = row.try_get("script")?;
-
-                let lock_time: i64 = row.try_get("lock_time")?;
-                let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
-                let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
-
-                let creation_time = SystemTime::UNIX_EPOCH
-                    .checked_add(Duration::from_secs(creation_time as u64))
-                    .ok_or(GetSwapsError::General("invalid timestamp".into()))?;
-                let swap = Swap {
-                    creation_time,
-                    public: SwapPublicData {
-                        address: address.clone(),
-                        hash: sha256::Hash::from_slice(&payment_hash)?,
-                        lock_time: lock_time as u32,
-                        payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                        swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                        script: ScriptBuf::from_bytes(script),
-                    },
-                    private: SwapPrivateData {
-                        swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
-                    },
-                };
-
-                let preimage = match preimage {
-                    Some(preimage) => Some(
-                        preimage
-                            .try_into()
-                            .map_err(|_| GetSwapsError::InvalidPreimage)?,
-                    ),
-                    None => None,
-                };
-
+                let swap_state = self.map_swap_state(&row)?;
                 result.insert(
                     address.clone(),
                     SwapStatePaidOutpoints {
                         paid_outpoints: Vec::new(),
-                        swap_state: SwapState { swap, preimage },
+                        swap_state,
                     },
                 );
             }
@@ -536,6 +353,21 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 }
 
+fn swap_state_fields(prefix: &str) -> String {
+    format!(
+        r#"{0}.payment_hash
+         , {0}.creation_time
+         , {0}.payer_pubkey
+         , {0}.swapper_pubkey
+         , {0}.script
+         , {0}.address
+         , {0}.lock_time
+         , {0}.swapper_privkey
+         , {0}.preimage"#,
+        prefix
+    )
+}
+
 impl From<sqlx::Error> for SwapPersistenceError {
     fn from(value: sqlx::Error) -> Self {
         match value {
@@ -554,44 +386,8 @@ impl From<SystemTimeError> for SwapPersistenceError {
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for GetSwapError {
-    fn from(value: bitcoin::hashes::hex::Error) -> Self {
-        GetSwapError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::address::Error> for GetSwapError {
-    fn from(value: bitcoin::address::Error) -> Self {
-        GetSwapError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::key::Error> for GetSwapError {
-    fn from(value: bitcoin::key::Error) -> Self {
-        GetSwapError::General(Box::new(value))
-    }
-}
-
-impl From<sqlx::Error> for GetSwapError {
-    fn from(value: sqlx::Error) -> Self {
-        GetSwapError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::hashes::Error> for GetSwapError {
-    fn from(value: bitcoin::hashes::Error) -> Self {
-        GetSwapError::General(Box::new(value))
-    }
-}
-
 impl From<bitcoin::hashes::hex::Error> for GetSwapsError {
     fn from(value: bitcoin::hashes::hex::Error) -> Self {
-        GetSwapsError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::hashes::Error> for GetSwapsError {
-    fn from(value: bitcoin::hashes::Error) -> Self {
         GetSwapsError::General(Box::new(value))
     }
 }
@@ -610,6 +406,12 @@ impl From<bitcoin::key::Error> for GetSwapsError {
 
 impl From<sqlx::Error> for GetSwapsError {
     fn from(value: sqlx::Error) -> Self {
+        GetSwapsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::Error> for GetSwapsError {
+    fn from(value: bitcoin::hashes::Error) -> Self {
         GetSwapsError::General(Box::new(value))
     }
 }

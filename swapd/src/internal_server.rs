@@ -13,7 +13,7 @@ use crate::{
     chain::{ChainClient, ChainRepository, FeeEstimate, FeeEstimator},
     chain_filter::ChainFilterRepository,
     redeem::{RedeemError, RedeemRepository, RedeemService, RedeemServiceError},
-    swap::{GetSwapError, PrivateKeyProvider, SwapRepository},
+    swap::{GetSwapsError, PrivateKeyProvider, SwapRepository},
     wallet::{Wallet, WalletError},
 };
 
@@ -189,7 +189,7 @@ where
                     Ok(swap) => swap,
                     Err(e) => {
                         return Err(match e {
-                            GetSwapError::NotFound => Status::not_found("swap not found"),
+                            GetSwapsError::NotFound => Status::not_found("swap not found"),
                             _ => Status::internal(format!("{:?}", e)),
                         })
                     }
@@ -204,7 +204,7 @@ where
                     Ok(swap) => swap,
                     Err(e) => {
                         return Err(match e {
-                            GetSwapError::NotFound => Status::not_found("swap not found"),
+                            GetSwapsError::NotFound => Status::not_found("swap not found"),
                             _ => Status::internal(format!("{:?}", e)),
                         })
                     }
@@ -217,7 +217,7 @@ where
                     Ok(swap) => swap,
                     Err(e) => {
                         return Err(match e {
-                            GetSwapError::NotFound => Status::not_found("swap not found"),
+                            GetSwapsError::NotFound => Status::not_found("swap not found"),
                             _ => Status::internal(format!("{:?}", e)),
                         })
                     }

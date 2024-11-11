@@ -23,7 +23,7 @@ use crate::{
 };
 
 use crate::swap::{
-    CreateSwapError, GetSwapError, PrivateKeyProvider, SwapPersistenceError, SwapRepository,
+    CreateSwapError, GetSwapsError, PrivateKeyProvider, SwapPersistenceError, SwapRepository,
     SwapService,
 };
 use swap_api::{
@@ -475,18 +475,18 @@ impl From<SwapPersistenceError> for Status {
     }
 }
 
-impl From<GetSwapError> for Status {
-    fn from(value: GetSwapError) -> Self {
+impl From<GetSwapsError> for Status {
+    fn from(value: GetSwapsError) -> Self {
         match value {
-            GetSwapError::NotFound => {
+            GetSwapsError::NotFound => {
                 trace!("swap not found");
                 Status::not_found("swap not found")
             }
-            GetSwapError::General(e) => {
+            GetSwapsError::General(e) => {
                 error!("failed to get swap: {:?}", e);
                 Status::internal("internal error")
             }
-            GetSwapError::InvalidPreimage => {
+            GetSwapsError::InvalidPreimage => {
                 error!("got invalid preimage");
                 Status::internal("internal error")
             }

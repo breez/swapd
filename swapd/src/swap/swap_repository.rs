@@ -26,15 +26,10 @@ pub enum GetPaidUtxosError {
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
-#[derive(Debug)]
-pub enum GetSwapError {
-    NotFound,
-    InvalidPreimage,
-    General(Box<dyn std::error::Error + Sync + Send>),
-}
-
 #[derive(Debug, Error)]
 pub enum GetSwapsError {
+    #[error("swap not found")]
+    NotFound,
     #[error("invalid preimage")]
     InvalidPreimage,
     #[error("{0}")]
@@ -77,12 +72,12 @@ pub trait SwapRepository {
         label: &str,
         result: &PaymentResult,
     ) -> Result<(), AddPaymentResultError>;
-    async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapError>;
-    async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapError>;
+    async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapsError>;
+    async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapsError>;
     async fn get_swap_by_payment_request(
         &self,
         payment_request: &str,
-    ) -> Result<SwapState, GetSwapError>;
+    ) -> Result<SwapState, GetSwapsError>;
     async fn get_swaps(
         &self,
         addresses: &[Address],
