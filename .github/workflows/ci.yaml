@@ -216,7 +216,7 @@ jobs:
         env:
           TEST_DEBUG: 1
           SLOW_MACHINE: 1
-          PYTEST_PAR: 10
+          PYTEST_PAR: 5
         run: make itest
   
   utest:
