@@ -5,7 +5,7 @@ import warnings
 
 import swap_internal_pb2 as swap__internal__pb2
 
-GRPC_GENERATED_VERSION = "1.66.1"
+GRPC_GENERATED_VERSION = "1.67.1"
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
