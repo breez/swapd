@@ -98,7 +98,14 @@ def test_redeem_rbf_new_feerate(node_factory, swapd_factory):
         if len(memp) == 0:
             return False
         assert len(memp) == 1
-        return memp[0] != redeem_txid1
+        redeem_txid2 = memp[0]
+        if redeem_txid2 == redeem_txid1:
+            return False
+
+        redeem_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
+            redeem_txid2, True
+        )
+        return redeem_raw2["vout"][0]["value"] != redeem_raw1["vout"][0]["value"]
 
     wait_for(check_bumped)
     redeem_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
