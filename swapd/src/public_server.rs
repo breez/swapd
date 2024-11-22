@@ -50,6 +50,8 @@ where
     pub max_swap_amount_sat: u64,
     pub min_confirmations: u64,
     pub min_redeem_blocks: u32,
+    pub pay_fee_limit_base_msat: u64,
+    pub pay_fee_limit_ppm: u64,
     pub chain_service: Arc<C>,
     pub chain_filter_service: Arc<CF>,
     pub chain_repository: Arc<CR>,
@@ -74,6 +76,8 @@ where
     max_swap_amount_sat: u64,
     min_confirmations: u64,
     min_redeem_blocks: u32,
+    pay_fee_limit_base_msat: u64,
+    pay_fee_limit_ppm: u64,
     chain_service: Arc<C>,
     chain_filter_service: Arc<CF>,
     chain_repository: Arc<CR>,
@@ -99,6 +103,8 @@ where
             min_confirmations: params.min_confirmations,
             min_redeem_blocks: params.min_redeem_blocks,
             max_swap_amount_sat: params.max_swap_amount_sat,
+            pay_fee_limit_base_msat: params.pay_fee_limit_base_msat,
+            pay_fee_limit_ppm: params.pay_fee_limit_ppm,
             chain_service: params.chain_service,
             chain_filter_service: params.chain_filter_service,
             chain_repository: params.chain_repository,
@@ -421,12 +427,17 @@ where
         // funds, but not redeemed anything onchain yet. That will happen in the
         // redeem module.
         // TODO: Add a maximum fee here?
+        let fee_limit_msat = self.pay_fee_limit_base_msat
+            + amount_msat
+                .saturating_mul(self.pay_fee_limit_ppm)
+                .saturating_div(1_000_000);
         let pay_result = self
             .lightning_client
             .pay(PaymentRequest {
                 bolt11: req.payment_request,
                 payment_hash: *hash,
                 label: label.clone(),
+                fee_limit_msat,
             })
             .await?;
 

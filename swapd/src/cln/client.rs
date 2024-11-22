@@ -18,7 +18,7 @@ use crate::lightning::{
 
 use super::cln_api::{
     listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus,
-    ListpaysRequest, ListsendpaysRequest, PayRequest, WaitsendpayRequest,
+    Amount, ListpaysRequest, ListsendpaysRequest, PayRequest, WaitsendpayRequest,
 };
 
 pub struct ClientConnection {
@@ -105,6 +105,9 @@ impl LightningClient for Client {
             .pay(Request::new(PayRequest {
                 label: Some(request.label),
                 bolt11: request.bolt11,
+                maxfee: Some(Amount {
+                    msat: request.fee_limit_msat,
+                }),
                 ..Default::default()
             }))
             .await

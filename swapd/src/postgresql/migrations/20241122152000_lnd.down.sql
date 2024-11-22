@@ -1,0 +1,1 @@
+DROP TABLE lnd_payments;

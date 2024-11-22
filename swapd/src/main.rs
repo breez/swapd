@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
@@ -6,16 +6,19 @@ use chain::{ChainMonitor, FallbackFeeEstimator};
 use chain_filter::ChainFilterImpl;
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
+use lightning::LightningClient;
+use postgresql::LndRepository;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use redeem::{PreimageMonitor, RedeemMonitor, RedeemMonitorParams, RedeemService};
 use reqwest::Url;
-use sqlx::PgPool;
+use sqlx::{PgPool, Pool, Postgres};
 use swap::{RandomPrivateKeyProvider, SwapService};
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Certificate, Identity, Server, Uri};
 use tracing::{field, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use wallet::Wallet;
 use whatthefee::WhatTheFeeEstimator;
 
 mod bitcoind;
@@ -24,6 +27,7 @@ mod chain_filter;
 mod cln;
 mod internal_server;
 mod lightning;
+mod lnd;
 mod postgresql;
 mod public_server;
 mod redeem;
@@ -88,24 +92,42 @@ struct Args {
     #[arg(long, default_value = "546")]
     pub dust_limit_sat: u64,
 
-    /// Address to the cln grpc api.
+    /// cln only: Address to the cln grpc api.
     #[arg(long)]
-    pub cln_grpc_address: Uri,
+    pub cln_grpc_address: Option<Uri>,
 
-    /// Client key for grpc access. Can either be a file path or the key
-    /// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
+    /// cln only: Client key for grpc access. Can either be a file path or the
+    /// key contents. Typically stored in
+    /// `lightningd-dir/{network}/client-key.pem`.
     #[arg(long)]
-    pub cln_grpc_ca_cert: FileOrCert,
+    pub cln_grpc_ca_cert: Option<FileOrCert>,
 
-    /// Client cert for grpc access. Can either be a file path or the cert
-    /// contents. Typically stored in `lightningd-dir/{network}/client.pem`.
+    /// cln only: Client cert for grpc access. Can either be a file path or the
+    /// cert contents. Typically stored in
+    /// `lightningd-dir/{network}/client.pem`.
     #[arg(long)]
-    pub cln_grpc_client_cert: FileOrCert,
+    pub cln_grpc_client_cert: Option<FileOrCert>,
 
-    /// Client key for grpc access. Can either be a file path or the key
-    /// contents. Typically stored in `lightningd-dir/{network}/client-key.pem`.
+    /// cln only: Client key for grpc access. Can either be a file path or the
+    /// key contents. Typically stored in
+    /// `lightningd-dir/{network}/client-key.pem`.
     #[arg(long)]
-    pub cln_grpc_client_key: FileOrCert,
+    pub cln_grpc_client_key: Option<FileOrCert>,
+
+    /// lnd only: Address to the lnd grpc api.
+    #[arg(long)]
+    pub lnd_grpc_address: Option<Uri>,
+
+    /// lnd only: Tls cert for grpc access. Can either be a file path or the
+    /// cert contents. Typically stored in `lnd-dir/tls.cert`.
+    #[arg(long)]
+    pub lnd_grpc_tls_cert: Option<FileOrCert>,
+
+    /// lnd only: Macaroon for grpc access. Can either be a file path or the
+    /// macaroon contents. The macaroon needs offchain:read, offchain:write and
+    /// address:write permissions.
+    #[arg(long)]
+    pub lnd_grpc_macaroon: Option<FileOrCert>,
 
     /// Loglevel to use. Can be used to filter loges through the env filter
     /// format.
@@ -171,6 +193,16 @@ struct Args {
     /// should then be run separately.
     #[arg(long)]
     pub no_servers: bool,
+
+    // Base fee component of the maximum payment fee. The max fee is calculated
+    // as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
+    #[arg(long, default_value = "5000")]
+    pub pay_fee_limit_base_msat: u64,
+
+    // Fee rate component of the maximum payment fee. The max fee is calculated
+    // as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
+    #[arg(long, default_value = "4000")]
+    pub pay_fee_limit_ppm: u64,
 }
 
 #[tokio::main]
@@ -180,6 +212,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(EnvFilter::new(&args.log_level))
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .init();
+
+    let pgpool = Arc::new(
+        PgPool::connect(&args.db_url)
+            .await
+            .map_err(|e| format!("failed to connect to postgres: {:?}", e))?,
+    );
+    if args.auto_migrate {
+        postgresql::migrate(&pgpool).await?;
+    }
+
+    match (&args.cln_grpc_address, &args.lnd_grpc_address) {
+        (Some(_), Some(_)) => Err("cannot have both cln and lnd nodes")?,
+        (None, None) => Err("a cln or lnd connection needs to be configured")?,
+        (Some(cln_grpc_address), None) => {
+            let cln_grpc_ca_cert = match &args.cln_grpc_ca_cert {
+                Some(c) => c,
+                None => Err("missing required arg cln_grpc_ca_cert")?,
+            };
+            let cln_grpc_client_cert = match &args.cln_grpc_client_cert {
+                Some(c) => c,
+                None => Err("missing required arg cln_grpc_client_cert")?,
+            };
+            let cln_grpc_client_key = match &args.cln_grpc_client_key {
+                Some(c) => c,
+                None => Err("missing required arg cln_grpc_client_key")?,
+            };
+            let cln_ca_cert = Certificate::from_pem(cln_grpc_ca_cert.resolve().await);
+            let cln_client_cert = cln_grpc_client_cert.resolve().await;
+            let cln_client_key = cln_grpc_client_key.resolve().await;
+            let cln_identity = Identity::from_pem(cln_client_cert, cln_client_key);
+            let cln_conn = cln::ClientConnection {
+                address: cln_grpc_address.clone(),
+                ca_cert: cln_ca_cert,
+                identity: cln_identity,
+            };
+            let cln_client = Arc::new(cln::Client::new(cln_conn, args.network));
+            run_with_client(cln_client, pgpool, args).await?;
+        }
+        (None, Some(lnd_grpc_address)) => {
+            let lnd_grpc_tls_cert = match &args.lnd_grpc_tls_cert {
+                Some(c) => c,
+                None => Err("missing required arg lnd_grpc_tls_cert")?,
+            };
+            let lnd_grpc_macaroon = match &args.lnd_grpc_macaroon {
+                Some(c) => c,
+                None => Err("missing required arg lnd_grpc_macaroon")?,
+            };
+            let lnd_tls_cert = lnd_grpc_tls_cert.resolve().await;
+            let lnd_macaroon = lnd_grpc_macaroon.resolve().await;
+            let lnd_conn = lnd::ClientConnection {
+                address: lnd_grpc_address.clone(),
+                macaroon: lnd_macaroon,
+                tls_cert: Certificate::from_pem(lnd_tls_cert),
+            };
+            let lnd_repository = Arc::new(LndRepository::new(Arc::clone(&pgpool)));
+            let lnd_client = Arc::new(lnd::Client::new(lnd_conn, args.network, lnd_repository)?);
+            run_with_client(lnd_client, pgpool, args).await?;
+        }
+    };
+
+    Ok(())
+}
+
+async fn run_with_client<T>(
+    lightning_client: Arc<T>,
+    pgpool: Arc<Pool<Postgres>>,
+    args: Args,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    T: LightningClient + Wallet + Send + Sync + Debug + 'static,
+{
     let privkey_provider = RandomPrivateKeyProvider::new(args.network);
     let swap_service = Arc::new(SwapService::new(
         args.network,
@@ -194,24 +297,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.bitcoind_rpc_password,
         args.network,
     ));
-    let cln_ca_cert = Certificate::from_pem(args.cln_grpc_ca_cert.resolve().await);
-    let cln_client_cert = args.cln_grpc_client_cert.resolve().await;
-    let cln_client_key = args.cln_grpc_client_key.resolve().await;
-    let cln_identity = Identity::from_pem(cln_client_cert, cln_client_key);
-    let cln_conn = cln::ClientConnection {
-        address: args.cln_grpc_address,
-        ca_cert: cln_ca_cert,
-        identity: cln_identity,
-    };
-    let cln_client = Arc::new(cln::Client::new(cln_conn, args.network));
-    let pgpool = Arc::new(
-        PgPool::connect(&args.db_url)
-            .await
-            .map_err(|e| format!("failed to connect to postgres: {:?}", e))?,
-    );
-    if args.auto_migrate {
-        postgresql::migrate(&pgpool).await?;
-    }
+
     let swap_repository = Arc::new(postgresql::SwapRepository::new(
         Arc::clone(&pgpool),
         args.network,
@@ -268,7 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
             redeem_repository: Arc::clone(&redeem_repository),
             redeem_service: Arc::clone(&redeem_service),
-            wallet: Arc::clone(&cln_client),
+            wallet: Arc::clone(&lightning_client),
         });
         tracker.spawn(async move {
             info!("Starting redeem monitor");
@@ -286,7 +372,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let preimage_monitor_token = token.clone();
         let preimage_monitor = PreimageMonitor::new(
             Arc::clone(&chain_repository),
-            Arc::clone(&cln_client),
+            Arc::clone(&lightning_client),
             Duration::from_secs(args.preimage_poll_interval_seconds),
             Arc::clone(&swap_repository),
         );
@@ -327,10 +413,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_swap_amount_sat: args.max_swap_amount_sat,
             min_confirmations: args.min_confirmations,
             min_redeem_blocks: args.min_redeem_blocks,
+            pay_fee_limit_base_msat: args.pay_fee_limit_base_msat,
+            pay_fee_limit_ppm: args.pay_fee_limit_ppm,
             chain_service: Arc::clone(&chain_client),
             chain_filter_service: Arc::clone(&chain_filter),
             chain_repository: Arc::clone(&chain_repository),
-            lightning_client: Arc::clone(&cln_client),
+            lightning_client: Arc::clone(&lightning_client),
             swap_service: Arc::clone(&swap_service),
             swap_repository: Arc::clone(&swap_repository),
             fee_estimator: Arc::clone(&fee_estimator),
@@ -360,7 +448,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 chain_repository: Arc::clone(&chain_repository),
                 fee_estimator: Arc::clone(&fee_estimator),
                 swap_repository: Arc::clone(&swap_repository),
-                wallet: Arc::clone(&cln_client),
+                wallet: Arc::clone(&lightning_client),
                 network: args.network,
                 redeem_service: Arc::clone(&redeem_service),
                 token: token.clone(),

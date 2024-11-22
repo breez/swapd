@@ -17,4 +17,12 @@ fn main() {
         .build_client(true)
         .compile(&["proto/cln/node.proto"], &["proto/cln"])
         .unwrap();
+
+    tonic_build::configure()
+        .build_client(true)
+        .compile(
+            &["proto/lnd/lightning.proto", "proto/lnd/router.proto"],
+            &["proto/lnd"],
+        )
+        .unwrap();
 }
