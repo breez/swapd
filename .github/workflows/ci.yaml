@@ -268,8 +268,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        lnd-version:
-          - jssdwt-v0.18.3-with-ca
+        test:
+          - lnd-version: jssdwt-v0.18.3-with-ca
+            cln-version: v24.08
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -298,7 +299,7 @@ jobs:
       - name: Download lnd artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ runner.os }}-${{ runner.arch }}-lnd-${{ matrix.lnd-version}}
+          name: ${{ runner.os }}-${{ runner.arch }}-lnd-${{ matrix.test.lnd-version}}
           path: lnd-artifact
 
       - name: Install lnd
@@ -309,7 +310,7 @@ jobs:
       - name: Download cln artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.cln-version}}
+          name: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.test.cln-version}}
           path: inst
 
       - name: Install CLN
