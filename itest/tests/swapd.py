@@ -46,7 +46,6 @@ class SwapD(TailableProc):
         self,
         lightning_node,
         whatthefee,
-        node_grpc_port,
         process_dir,
         bitcoindproxy,
         db_url,
@@ -66,21 +65,12 @@ class SwapD(TailableProc):
         self.process_dir = process_dir
         self.opts = SWAPD_CONFIG.copy()
 
-        p = Path(lightning_node.daemon.lightning_dir) / TEST_NETWORK
-        cert_path = p / "client.pem"
-        key_path = p / "client-key.pem"
-        ca_cert_path = p / "ca.pem"
-
         opts = {
             "address": "127.0.0.1:{}".format(grpc_port),
             "internal-address": "127.0.0.1:{}".format(internal_grpc_port),
             "network": TEST_NETWORK,
             "bitcoind-rpc-user": BITCOIND_CONFIG["rpcuser"],
             "bitcoind-rpc-password": BITCOIND_CONFIG["rpcpassword"],
-            "cln-grpc-address": "https://localhost:{}".format(node_grpc_port),
-            "cln-grpc-ca-cert": ca_cert_path.absolute().as_posix(),
-            "cln-grpc-client-cert": cert_path.absolute().as_posix(),
-            "cln-grpc-client-key": key_path.absolute().as_posix(),
             "db-url": db_url,
             "auto-migrate": None,
             "whatthefee-url": "http://127.0.0.1:{}?fees={}".format(
@@ -104,7 +94,8 @@ class SwapD(TailableProc):
             else:
                 opts.append("--{}={}".format(k, v))
 
-        return [self.executable] + opts
+        cmd = [self.executable] + opts
+        return cmd
 
     def start(self, stdin=None, wait_for_initialized=True, stderr_redir=False):
         self.opts["bitcoind-rpc-address"] = "http://127.0.0.1:{}".format(
@@ -133,14 +124,12 @@ class SwapdServer(object):
         bitcoind,
         whatthefee,
         lightning_node,
-        node_grpc_port,
         db_url,
         may_fail=False,
         grpc_port=None,
         internal_grpc_port=None,
         options=None,
         fees=[20, 40, 60, 80, 100],
-        **kwargs,
     ):
         self.bitcoind = bitcoind
         self.lightning_node = lightning_node
@@ -154,7 +143,6 @@ class SwapdServer(object):
         self.daemon = SwapD(
             lightning_node,
             whatthefee,
-            node_grpc_port,
             process_dir,
             bitcoind.get_proxy(),
             db_url,
@@ -253,7 +241,7 @@ class SwapdServer(object):
         self.daemon.cleanup()
 
         if self.rc != 0 and not self.may_fail:
-            raise ValueError("Node did not exit cleanly, rc={}".format(self.rc))
+            raise ValueError("Swapd did not exit cleanly, rc={}".format(self.rc))
         else:
             return self.rc
 
@@ -270,6 +258,11 @@ class SwapdServer(object):
             self.daemon.stop()
 
         self.start()
+
+
+def dump(obj):
+    for attr in dir(obj):
+        print("obj.%s = %r" % (attr, getattr(obj, attr)))
 
 
 class SwapperGrpc(object):
@@ -331,24 +324,24 @@ class SwapdFactory(object):
         self,
         testname,
         bitcoind,
-        executor,
         whatthefee,
         directory,
-        node_factory,
         postgres_factory,
+        node_factory,
+        options_provider,
     ):
 
         self.testname = testname
         self.next_id = 1
         self.instances = []
         self.reserved_ports = []
-        self.executor = executor
         self.whatthefee = whatthefee
         self.bitcoind = bitcoind
         self.directory = directory
         self.lock = threading.Lock()
-        self.node_factory = node_factory
         self.postgres_factory = postgres_factory
+        self.node_factory = node_factory
+        self.options_provider = options_provider
 
     def get_swapd_id(self):
         """Generate a unique numeric ID for a swapd instance"""
@@ -360,31 +353,31 @@ class SwapdFactory(object):
     def get_swapd(
         self,
         options=None,
-        start=True,
-        wait_for_bitcoind_sync=True,
-        may_fail=False,
-        expect_fail=False,
-        cleandir=True,
         fees=[20, 40, 60, 80, 100],
+        start=True,
+        expect_fail=False,
         **kwargs,
     ):
         grpc_port = self.get_unused_port()
         internal_grpc_port = self.get_unused_port()
-        cln_grpc_port = self.get_unused_port()
         swapd_id = self.get_swapd_id()
         process_dir = os.path.join(self.directory, "swapd-{}/".format(swapd_id))
-
         postgres = self.postgres_factory.get_container()
-        node = self.node_factory.get_node(options={"grpc-port": cln_grpc_port})
+        node = self.node_factory.get_node()
+        node_options = self.options_provider.get_options(node)
+        if options is None:
+            options = {}
+        for k, v in node_options.items():
+            options[k] = v
+
         swapd = SwapdServer(
             swapd_id,
             process_dir,
             self.bitcoind,
             self.whatthefee,
             node,
-            cln_grpc_port,
             postgres.connectionstring,
-            may_fail,
+            False,
             grpc_port,
             internal_grpc_port,
             options,
@@ -395,7 +388,7 @@ class SwapdFactory(object):
 
         if start:
             try:
-                swapd.start(wait_for_bitcoind_sync)
+                swapd.start()
             except Exception:
                 if expect_fail:
                     return swapd
@@ -487,3 +480,36 @@ class WhatTheFee(object):
 
     def magnify(self, quotient=2):
         self.quotient = quotient
+
+
+class ClnOptionsProvider(object):
+    def __init__(self):
+        pass
+
+    def get_options(self, node):
+        p = Path(node.node.daemon.lightning_dir) / TEST_NETWORK
+        cert_path = p / "client.pem"
+        key_path = p / "client-key.pem"
+        ca_cert_path = p / "ca.pem"
+
+        return {
+            "cln-grpc-address": "https://localhost:{}".format(node.grpc_port),
+            "cln-grpc-ca-cert": ca_cert_path.absolute().as_posix(),
+            "cln-grpc-client-cert": cert_path.absolute().as_posix(),
+            "cln-grpc-client-key": key_path.absolute().as_posix(),
+        }
+
+
+class LndOptionsProvider(object):
+    def __init__(self):
+        pass
+
+    def get_options(self, node):
+        p = Path(node.daemon.lnd_dir)
+        ca_cert_path = p / "ca.cert"
+
+        return {
+            "lnd-grpc-address": "https://localhost:{}".format(node.grpc_port),
+            "lnd-grpc-ca-cert": ca_cert_path.absolute().as_posix(),
+            "lnd-grpc-macaroon": node.macaroon,
+        }

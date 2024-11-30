@@ -1,17 +1,62 @@
 from pyln.testing.fixtures import (
     directory,
     test_name,
-    bitcoind,
-    executor,
-    node_factory,
+    node_factory as pyln_node_factory,
     teardown_checks,
 )
+from bitcoind import BitcoinD
+from cln import ClnNode, ClnNodeFactory
+from lnd import LndNode, LndNodeFactory
 from swapd import *
 from postgres import PostgresContainerFactory
 import pytest
 import re
 import time
 import docker
+
+
+@pytest.fixture
+def bitcoind(directory, teardown_checks):
+    bitcoind = BitcoinD(bitcoin_dir=directory)
+
+    try:
+        bitcoind.start()
+    except Exception:
+        bitcoind.stop()
+        raise
+
+    info = bitcoind.rpc.getnetworkinfo()
+
+    # FIXME: include liquid-regtest in this check after elementsd has been
+    # updated
+    if info["version"] < 200100 and env("TEST_NETWORK") != "liquid-regtest":
+        bitcoind.rpc.stop()
+        raise ValueError(
+            "bitcoind is too old. At least version 20100 (v0.20.1)"
+            " is needed, current version is {}".format(info["version"])
+        )
+    elif info["version"] < 160000:
+        bitcoind.rpc.stop()
+        raise ValueError(
+            "elementsd is too old. At least version 160000 (v0.16.0)"
+            " is needed, current version is {}".format(info["version"])
+        )
+
+    info = bitcoind.rpc.getblockchaininfo()
+    # Make sure we have some spendable funds
+    if info["blocks"] < 101:
+        bitcoind.generate_block(101 - info["blocks"])
+    elif bitcoind.rpc.getwalletinfo()["balance"] < 1:
+        logging.debug("Insufficient balance, generating 1 block")
+        bitcoind.generate_block(1)
+
+    yield bitcoind
+
+    try:
+        bitcoind.stop()
+    except Exception:
+        bitcoind.proc.kill()
+    bitcoind.proc.wait()
 
 
 @pytest.fixture
@@ -78,23 +123,68 @@ def postgres_factory(test_name, teardown_checks):
 
 
 @pytest.fixture
+def cln_factory(pyln_node_factory):
+    nf = ClnNodeFactory(pyln_node_factory)
+    yield nf
+    nf.killall()
+
+
+@pytest.fixture
+def lnd_factory(directory, bitcoind):
+    nf = LndNodeFactory(bitcoind, directory)
+    yield nf
+    nf.killall()
+
+
+@pytest.fixture
+def cln_options():
+    nf = ClnOptionsProvider()
+    yield nf
+
+
+@pytest.fixture
+def lnd_options(directory, bitcoind):
+    nf = LndOptionsProvider()
+    yield nf
+
+
+@pytest.fixture()
+def node_factory(pyln_node_factory):
+    return ClnNodeFactory(pyln_node_factory)
+
+
+@pytest.fixture()
+def options_provider(request):
+    return request.param
+
+
+@pytest.fixture()
 def swapd_factory(
+    request,
     directory,
     test_name,
     bitcoind,
-    executor,
     teardown_checks,
-    node_factory,
     postgres_factory,
     whatthefee,
+    cln_factory,
+    cln_options,
+    lnd_factory,
+    lnd_options,
 ):
+    node_factory = cln_factory
+    options_provider = cln_options
+    if request.param is not None and request.param == "lnd":
+        node_factory = lnd_factory
+        options_provider = lnd_options
+
     sf = SwapdFactory(
         test_name,
         bitcoind,
-        executor,
         whatthefee,
         directory=directory,
         node_factory=node_factory,
+        options_provider=options_provider,
         postgres_factory=postgres_factory,
     )
 

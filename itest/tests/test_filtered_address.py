@@ -5,14 +5,11 @@ import grpc
 def test_filtered_address(node_factory, swapd_factory):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
-    user_address = user.rpc.newaddr()["bech32"]
-    user_address, user_txid = user.fundwallet(200_000)
+    user_address, user_txid = user.fund_wallet(200_000)
     swapper.internal_rpc.add_address_filters([user_address])
 
     address, payment_request, _ = add_fund_init(user, swapper)
-    txid = user.rpc.withdraw(address, 100_000)["txid"]
-    user.bitcoin.generate_block(1)
-
+    user.send_onchain(address, 100_000, confirm=1)
     wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
 
     try:

@@ -20,6 +20,7 @@ else
 PYTEST_OPTS += --timeout 30
 endif
 
+PYTEST_CMD = . itest-env/bin/activate; PATH="target/debug:$(PATH)" itest-env/bin/pytest itest/tests $(PYTEST_OPTS)
 
 build: build-swapd build-cli
 
@@ -68,7 +69,10 @@ fmt-rust:
 	cargo fmt
 
 itest: build itest-env
-	. itest-env/bin/activate; PATH="target/debug:$(PATH)" itest-env/bin/pytest itest/tests $(PYTEST_OPTS)
+	$(PYTEST_CMD)
+
+itest-cln: build itest-env
+	$(PYTEST_CMD) --node="cln"
 
 itest-env:
 	virtualenv itest-env --python=$(which python3) --download --always-copy --clear
@@ -78,7 +82,14 @@ itest-env:
 itest-gen-proto: itest-env
 	. itest-env/bin/activate; \
 	python -m grpc_tools.protoc -Iswapd/proto/swap --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/swap/swap.proto; \
-	python -m grpc_tools.protoc -Iswapd/proto/swap_internal --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/swap_internal/swap_internal.proto
+	python -m grpc_tools.protoc -Iswapd/proto/swap_internal --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/swap_internal/swap_internal.proto; \
+	python -m grpc_tools.protoc -Iswapd/proto/lnd --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/lnd/lightning.proto; \
+	python -m grpc_tools.protoc -Iswapd/proto/lnd --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/lnd/walletunlocker.proto; \
+	python -m grpc_tools.protoc -Iswapd/proto/lnd --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/lnd/walletkit.proto; \
+	python -m grpc_tools.protoc -Iswapd/proto/lnd --python_out=itest/tests --pyi_out=itest/tests --grpc_python_out=itest/tests swapd/proto/lnd/signer.proto; \
+
+itest-lnd: build itest-env
+	$(PYTEST_CMD) --node="lnd"
 
 release: release-swapd release-cli
 
