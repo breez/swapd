@@ -52,6 +52,7 @@ where
     pub min_redeem_blocks: u32,
     pub pay_fee_limit_base_msat: u64,
     pub pay_fee_limit_ppm: u64,
+    pub pay_timeout_seconds: u16,
     pub chain_service: Arc<C>,
     pub chain_filter_service: Arc<CF>,
     pub chain_repository: Arc<CR>,
@@ -78,6 +79,7 @@ where
     min_redeem_blocks: u32,
     pay_fee_limit_base_msat: u64,
     pay_fee_limit_ppm: u64,
+    pay_timeout_seconds: u16,
     chain_service: Arc<C>,
     chain_filter_service: Arc<CF>,
     chain_repository: Arc<CR>,
@@ -105,6 +107,7 @@ where
             max_swap_amount_sat: params.max_swap_amount_sat,
             pay_fee_limit_base_msat: params.pay_fee_limit_base_msat,
             pay_fee_limit_ppm: params.pay_fee_limit_ppm,
+            pay_timeout_seconds: params.pay_timeout_seconds,
             chain_service: params.chain_service,
             chain_filter_service: params.chain_filter_service,
             chain_repository: params.chain_repository,
@@ -431,6 +434,7 @@ where
             + amount_msat
                 .saturating_mul(self.pay_fee_limit_ppm)
                 .saturating_div(1_000_000);
+        debug!("about to pay");
         let pay_result = self
             .lightning_client
             .pay(PaymentRequest {
@@ -438,6 +442,7 @@ where
                 payment_hash: *hash,
                 label: label.clone(),
                 fee_limit_msat,
+                timeout_seconds: self.pay_timeout_seconds,
             })
             .await?;
 

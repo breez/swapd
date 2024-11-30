@@ -118,10 +118,10 @@ struct Args {
     #[arg(long)]
     pub lnd_grpc_address: Option<Uri>,
 
-    /// lnd only: Tls cert for grpc access. Can either be a file path or the
-    /// cert contents. Typically stored in `lnd-dir/tls.cert`.
+    /// lnd only: CA cert for grpc access. Can either be a file path or the
+    /// cert contents. Typically stored in `lnd-dir/ca.cert`.
     #[arg(long)]
-    pub lnd_grpc_tls_cert: Option<FileOrCert>,
+    pub lnd_grpc_ca_cert: Option<FileOrCert>,
 
     /// lnd only: Macaroon for grpc access. Can either be a file path or the
     /// macaroon contents. The macaroon needs offchain:read, offchain:write and
@@ -203,6 +203,10 @@ struct Args {
     // as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
     #[arg(long, default_value = "4000")]
     pub pay_fee_limit_ppm: u64,
+
+    // Payment timeout in seconds.
+    #[arg(long, default_value = "120")]
+    pub pay_timeout_seconds: u16,
 }
 
 #[tokio::main]
@@ -251,7 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_with_client(cln_client, pgpool, args).await?;
         }
         (None, Some(lnd_grpc_address)) => {
-            let lnd_grpc_tls_cert = match &args.lnd_grpc_tls_cert {
+            let lnd_grpc_ca_cert = match &args.lnd_grpc_ca_cert {
                 Some(c) => c,
                 None => Err("missing required arg lnd_grpc_tls_cert")?,
             };
@@ -259,12 +263,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(c) => c,
                 None => Err("missing required arg lnd_grpc_macaroon")?,
             };
-            let lnd_tls_cert = lnd_grpc_tls_cert.resolve().await;
+            let lnd_ca_cert = lnd_grpc_ca_cert.resolve().await;
             let lnd_macaroon = lnd_grpc_macaroon.resolve().await;
             let lnd_conn = lnd::ClientConnection {
                 address: lnd_grpc_address.clone(),
                 macaroon: lnd_macaroon,
-                tls_cert: Certificate::from_pem(lnd_tls_cert),
+                ca_cert: Certificate::from_pem(lnd_ca_cert),
             };
             let lnd_repository = Arc::new(LndRepository::new(Arc::clone(&pgpool)));
             let lnd_client = Arc::new(lnd::Client::new(lnd_conn, args.network, lnd_repository)?);
@@ -415,6 +419,7 @@ where
             min_redeem_blocks: args.min_redeem_blocks,
             pay_fee_limit_base_msat: args.pay_fee_limit_base_msat,
             pay_fee_limit_ppm: args.pay_fee_limit_ppm,
+            pay_timeout_seconds: args.pay_timeout_seconds,
             chain_service: Arc::clone(&chain_client),
             chain_filter_service: Arc::clone(&chain_filter),
             chain_repository: Arc::clone(&chain_repository),

@@ -14,6 +14,7 @@ pub struct PaymentRequest {
     pub payment_hash: sha256::Hash,
     pub label: String,
     pub fee_limit_msat: u64,
+    pub timeout_seconds: u16,
 }
 
 #[derive(Debug)]

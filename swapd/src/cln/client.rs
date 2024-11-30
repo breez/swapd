@@ -108,6 +108,7 @@ impl LightningClient for Client {
                 maxfee: Some(Amount {
                     msat: request.fee_limit_msat,
                 }),
+                retry_for: Some(request.timeout_seconds as u32),
                 ..Default::default()
             }))
             .await

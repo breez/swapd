@@ -25,7 +25,7 @@ use super::{
 
 pub struct ClientConnection {
     pub address: Uri,
-    pub tls_cert: Certificate,
+    pub ca_cert: Certificate,
     pub macaroon: String,
 }
 
@@ -76,7 +76,7 @@ where
         network: Network,
         repository: Arc<R>,
     ) -> Result<Self, String> {
-        let tls_config = ClientTlsConfig::new().ca_certificate(connection.tls_cert);
+        let tls_config = ClientTlsConfig::new().ca_certificate(connection.ca_cert);
         Ok(Self {
             address: connection.address,
             network,
@@ -199,12 +199,20 @@ where
             .send_payment_v2(SendPaymentRequest {
                 payment_request: request.bolt11,
                 fee_limit_msat: request.fee_limit_msat as i64,
+                timeout_seconds: request.timeout_seconds as i32,
                 ..Default::default()
             })
-            .await?
+            .await
+            .map_err(|e| {
+                error!("send_payment_v2 returned error: {:?}", e);
+                e
+            })?
             .into_inner();
         let mut is_first_update = true;
-        while let Some(update) = stream.message().await? {
+        while let Some(update) = stream.message().await.map_err(|e| {
+            error!("send_payment_v2 message stream returned error: {:?}", e);
+            e
+        })? {
             if is_first_update {
                 is_first_update = false;
                 self.repository
