@@ -262,7 +262,9 @@ jobs:
   
   itest-lnd:
     name: Integration tests (lnd)
-    needs: compile-lnd
+    needs:
+      - compile-cln
+      - compile-lnd
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -303,6 +305,17 @@ jobs:
         run: |
           chmod +x -R lnd-artifact/
           sudo cp lnd-artifact/lnd /usr/local/bin
+
+      - name: Download cln artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.cln-version}}
+          path: inst
+
+      - name: Install CLN
+        run: |
+          chmod +x -R inst/
+          sudo cp -a inst/usr/local/. /usr/local/
 
       - name: Install virtualenv
         run: python -m pip install --user virtualenv
