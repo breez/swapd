@@ -5,8 +5,13 @@ from pyln.testing.utils import (
     wait_for,
 )
 
+from pyln.testing.db import Sqlite3Db
+
+import os
 import random
 import string
+import shutil
+import threading
 
 FUNDAMOUNT = 10**6
 
@@ -19,7 +24,12 @@ class ClnNode:
         self.node = node
         self.info = {}
 
-    def start(self):
+    def start(self, wait_for_bitcoind_sync=True):
+        try:
+            self.node.start(wait_for_bitcoind_sync)
+        except Exception:
+            self.stop()
+            raise
         self.info = {"id": self.node.info["id"]}
 
     def stop(self, timeout=10):
@@ -109,18 +119,67 @@ class ClnNode:
 class ClnNodeFactory(object):
     """A factory to setup and start wrapped `lightningd` daemons."""
 
-    def __init__(self, node_factory):
+    def __init__(self, bitcoind, directory):
+        self.next_id = 1
+        self.nodes = []
         self.reserved_ports = []
-        self.node_factory = node_factory
+        self.bitcoind = bitcoind
+        self.directory = directory
+        self.lock = threading.Lock()
 
-    def get_node(self):
-        cln_grpc_port = reserve_unused_port()
-        self.reserved_ports.append(cln_grpc_port)
-        node = self.node_factory.get_node(options={"grpc-port": cln_grpc_port})
-        cln_node = ClnNode(node, node.bitcoin, node.port, cln_grpc_port)
-        cln_node.start()
+    def get_node(
+        self, node_id=None, start=True, cleandir=True, wait_for_bitcoind_sync=True
+    ):
+        node_id = self.get_node_id() if not node_id else node_id
+        port = reserve_unused_port()
+        grpc_port = reserve_unused_port()
+        self.reserved_ports.append(port)
+        self.reserved_ports.append(grpc_port)
+
+        lightning_dir = os.path.join(self.directory, "lightning-{}/".format(node_id))
+
+        if cleandir and os.path.exists(lightning_dir):
+            shutil.rmtree(lightning_dir)
+
+        db_path = os.path.join(lightning_dir, "lightningd.sqlite3")
+        db = Sqlite3Db(db_path)
+        node = LightningNode(
+            node_id,
+            lightning_dir,
+            self.bitcoind,
+            None,
+            False,
+            port=port,
+            db=db,
+            options={"grpc-port": grpc_port},
+            feerates=(15000, 11000, 7500, 3750),
+        )
+
+        cln_node = ClnNode(node, self.bitcoind, port, grpc_port)
+        if start:
+            try:
+                cln_node.start(wait_for_bitcoind_sync)
+            except Exception:
+                node.daemon.stop()
+                raise
+
         return cln_node
 
     def killall(self):
-        for reserved_port in self.reserved_ports:
-            drop_unused_port(reserved_port)
+        """Returns true if every node we expected to succeed actually succeeded"""
+
+        for i in range(len(self.nodes)):
+            try:
+                self.nodes[i].stop()
+            except Exception:
+                pass
+
+        for p in self.reserved_ports:
+            drop_unused_port(p)
+
+    def get_node_id(self):
+        """Generate a unique numeric ID for a lightning node"""
+        with self.lock:
+            node_id = self.next_id
+            self.next_id += 1
+            return node_id

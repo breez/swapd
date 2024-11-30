@@ -123,8 +123,8 @@ def postgres_factory(test_name, teardown_checks):
 
 
 @pytest.fixture
-def cln_factory(pyln_node_factory):
-    nf = ClnNodeFactory(pyln_node_factory)
+def cln_factory(directory, bitcoind):
+    nf = ClnNodeFactory(bitcoind, directory)
     yield nf
     nf.killall()
 
@@ -149,8 +149,8 @@ def lnd_options(directory, bitcoind):
 
 
 @pytest.fixture()
-def node_factory(pyln_node_factory):
-    return ClnNodeFactory(pyln_node_factory)
+def node_factory(cln_factory):
+    return cln_factory
 
 
 @pytest.fixture()

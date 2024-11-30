@@ -3,10 +3,6 @@ from bitcoin.wallet import CBitcoinSecret
 from fixtures import *
 from pyln.testing.fixtures import (
     directory,
-    db_provider,
-    executor,
-    jsonschemas,
-    node_cls,
     setup_logging,
     teardown_checks,
     test_base_dir,
@@ -19,10 +15,6 @@ import os
 __all__ = [
     "bitcoind",
     "directory",
-    "db_provider",
-    "executor",
-    "jsonschemas",
-    "node_cls",
     "node_factory",
     "setup_logging",
     "teardown_checks",
