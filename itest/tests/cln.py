@@ -163,6 +163,7 @@ class ClnNodeFactory(object):
                 node.daemon.stop()
                 raise
 
+        self.nodes.append(cln_node)
         return cln_node
 
     def killall(self):
