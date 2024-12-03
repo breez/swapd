@@ -1,5 +1,6 @@
 import docker
 import logging
+import os
 import psycopg2
 import time
 
@@ -75,10 +76,12 @@ class PostgresContainerFactory(object):
         client = docker.from_env()
         client.images.pull("postgres:16")
         db_name = "swapd"
+        r = os.urandom(4)
+        suffix = r.hex()
         container = client.containers.create(
             image="postgres:16",
             auto_remove=True,
-            name="swapd-test-{}".format(self.testname),
+            name="swapd-test-{}-{}".format(self.testname, suffix),
             ports={f"5432/tcp": port},
             environment={
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD",
