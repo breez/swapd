@@ -9,9 +9,7 @@ use bitcoin::{
     opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CLTV, OP_EQUALVERIFY, OP_HASH160},
     secp256k1::{All, Message, PublicKey, SecretKey},
     sighash::{self, Prevouts},
-    taproot::{
-        LeafVersion, Signature, TaprootBuilder, TaprootSpendInfo,
-    },
+    taproot::{LeafVersion, Signature, TaprootBuilder, TaprootSpendInfo},
     transaction::Version,
     Address, Amount, CompressedPublicKey, Network, Script, ScriptBuf, Sequence, TapLeafHash,
     TapSighashType, Transaction, TxIn, TxOut, Weight, Witness,
@@ -157,9 +155,7 @@ where
         let (x_only_refund_pubkey, _) = refund_pubkey.x_only_public_key();
         let claim_script = Script::builder()
             .push_opcode(OP_HASH160)
-            .push_slice(
-                ripemd160::Hash::hash(hash.as_byte_array()).as_byte_array(),
-            )
+            .push_slice(ripemd160::Hash::hash(hash.as_byte_array()).as_byte_array())
             .push_opcode(OP_EQUALVERIFY)
             .push_x_only_key(&x_only_claim_pubkey)
             .push_opcode(OP_CHECKSIG)
