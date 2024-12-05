@@ -18,7 +18,7 @@ use crate::{
         FeeEstimator, Utxo,
     },
     chain_filter::ChainFilterService,
-    lightning::{LightningClient, LightningError, PaymentRequest},
+    lightning::{LightningClient, LightningError, PaymentRequest, PaymentResult},
     swap::{ClaimableUtxo, PaymentAttempt},
 };
 
@@ -383,13 +383,6 @@ where
             })
             .await?;
 
-        info!(
-            label = field::display(&label),
-            hash = field::display(hash),
-            address = field::display(swap_state.swap.public.address),
-            "successfully paid"
-        );
-
         // Persist the preimage right away. There's also a background service
         // checking for preimages, in case the `pay` call failed, but the
         // payment did succeed.
@@ -402,17 +395,32 @@ where
             Err(e) => {
                 error!(
                     hash = field::display(swap_state.swap.public.hash),
-                    result = field::debug(pay_result),
+                    result = field::debug(&pay_result),
                     "failed to persist pay result: {:?}",
                     e
                 );
             }
         };
 
-        Ok(Response::new(PaySwapResponse::default()))
+        let response = match pay_result {
+            PaymentResult::Success { preimage: _ } => {
+                info!(
+                    label = field::display(&label),
+                    hash = field::display(hash),
+                    address = field::display(swap_state.swap.public.address),
+                    "successfully paid"
+                );
+                PaySwapResponse::default()
+            }
+            PaymentResult::Failure { error } => {
+                info!("payment failed with: {}", error);
+                return Err(Status::unknown("payment failed"));
+            }
+        };
+
+        Ok(Response::new(response))
     }
 
-    #[instrument(skip(self), level = "debug")]
     async fn refund_swap(
         &self,
         _request: Request<RefundSwapRequest>,
@@ -469,11 +477,11 @@ impl From<CreateSwapError> for Status {
             CreateSwapError::InvalidTransaction => {
                 error!("failed to create swap due to invalid transaction error.");
                 Status::internal("internal error")
-            },
+            }
             CreateSwapError::Taproot(e) => {
                 error!("failed to create swap due to taproot error: {:?}", e);
                 Status::internal("internal error")
-            },
+            }
         }
     }
 }
