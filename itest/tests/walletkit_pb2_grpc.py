@@ -7,7 +7,7 @@ import lightning_pb2 as lightning__pb2
 import signer_pb2 as signer__pb2
 import walletkit_pb2 as walletkit__pb2
 
-GRPC_GENERATED_VERSION = "1.67.1"
+GRPC_GENERATED_VERSION = "1.68.1"
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
