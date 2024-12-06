@@ -2,12 +2,12 @@ fn main() {
     println!("cargo:rerun-if-changed=migrations");
     tonic_build::configure()
         .build_server(true)
-        .compile(&["proto/swap/swap.proto"], &["proto/swap"])
+        .compile_protos(&["proto/swap/swap.proto"], &["proto/swap"])
         .unwrap();
 
     tonic_build::configure()
         .build_server(true)
-        .compile(
+        .compile_protos(
             &["proto/swap_internal/swap_internal.proto"],
             &["proto/swap_internal"],
         )
@@ -15,12 +15,12 @@ fn main() {
 
     tonic_build::configure()
         .build_client(true)
-        .compile(&["proto/cln/node.proto"], &["proto/cln"])
+        .compile_protos(&["proto/cln/node.proto"], &["proto/cln"])
         .unwrap();
 
     tonic_build::configure()
         .build_client(true)
-        .compile(
+        .compile_protos(
             &["proto/lnd/lightning.proto", "proto/lnd/router.proto"],
             &["proto/lnd"],
         )
