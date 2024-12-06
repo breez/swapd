@@ -37,22 +37,22 @@ class SwapperStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.AddFundInit = channel.unary_unary(
-            "/swap.Swapper/AddFundInit",
-            request_serializer=swap__pb2.AddFundInitRequest.SerializeToString,
-            response_deserializer=swap__pb2.AddFundInitReply.FromString,
+        self.CreateSwap = channel.unary_unary(
+            "/swap.Swapper/CreateSwap",
+            request_serializer=swap__pb2.CreateSwapRequest.SerializeToString,
+            response_deserializer=swap__pb2.CreateSwapResponse.FromString,
             _registered_method=True,
         )
-        self.AddFundStatus = channel.unary_unary(
-            "/swap.Swapper/AddFundStatus",
-            request_serializer=swap__pb2.AddFundStatusRequest.SerializeToString,
-            response_deserializer=swap__pb2.AddFundStatusReply.FromString,
+        self.PaySwap = channel.unary_unary(
+            "/swap.Swapper/PaySwap",
+            request_serializer=swap__pb2.PaySwapRequest.SerializeToString,
+            response_deserializer=swap__pb2.PaySwapResponse.FromString,
             _registered_method=True,
         )
-        self.GetSwapPayment = channel.unary_unary(
-            "/swap.Swapper/GetSwapPayment",
-            request_serializer=swap__pb2.GetSwapPaymentRequest.SerializeToString,
-            response_deserializer=swap__pb2.GetSwapPaymentReply.FromString,
+        self.RefundSwap = channel.unary_unary(
+            "/swap.Swapper/RefundSwap",
+            request_serializer=swap__pb2.RefundSwapRequest.SerializeToString,
+            response_deserializer=swap__pb2.RefundSwapResponse.FromString,
             _registered_method=True,
         )
 
@@ -60,19 +60,19 @@ class SwapperStub(object):
 class SwapperServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def AddFundInit(self, request, context):
+    def CreateSwap(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def AddFundStatus(self, request, context):
+    def PaySwap(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def GetSwapPayment(self, request, context):
+    def RefundSwap(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
@@ -81,20 +81,20 @@ class SwapperServicer(object):
 
 def add_SwapperServicer_to_server(servicer, server):
     rpc_method_handlers = {
-        "AddFundInit": grpc.unary_unary_rpc_method_handler(
-            servicer.AddFundInit,
-            request_deserializer=swap__pb2.AddFundInitRequest.FromString,
-            response_serializer=swap__pb2.AddFundInitReply.SerializeToString,
+        "CreateSwap": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateSwap,
+            request_deserializer=swap__pb2.CreateSwapRequest.FromString,
+            response_serializer=swap__pb2.CreateSwapResponse.SerializeToString,
         ),
-        "AddFundStatus": grpc.unary_unary_rpc_method_handler(
-            servicer.AddFundStatus,
-            request_deserializer=swap__pb2.AddFundStatusRequest.FromString,
-            response_serializer=swap__pb2.AddFundStatusReply.SerializeToString,
+        "PaySwap": grpc.unary_unary_rpc_method_handler(
+            servicer.PaySwap,
+            request_deserializer=swap__pb2.PaySwapRequest.FromString,
+            response_serializer=swap__pb2.PaySwapResponse.SerializeToString,
         ),
-        "GetSwapPayment": grpc.unary_unary_rpc_method_handler(
-            servicer.GetSwapPayment,
-            request_deserializer=swap__pb2.GetSwapPaymentRequest.FromString,
-            response_serializer=swap__pb2.GetSwapPaymentReply.SerializeToString,
+        "RefundSwap": grpc.unary_unary_rpc_method_handler(
+            servicer.RefundSwap,
+            request_deserializer=swap__pb2.RefundSwapRequest.FromString,
+            response_serializer=swap__pb2.RefundSwapResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -109,7 +109,7 @@ class Swapper(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def AddFundInit(
+    def CreateSwap(
         request,
         target,
         options=(),
@@ -124,9 +124,9 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/AddFundInit",
-            swap__pb2.AddFundInitRequest.SerializeToString,
-            swap__pb2.AddFundInitReply.FromString,
+            "/swap.Swapper/CreateSwap",
+            swap__pb2.CreateSwapRequest.SerializeToString,
+            swap__pb2.CreateSwapResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -139,7 +139,7 @@ class Swapper(object):
         )
 
     @staticmethod
-    def AddFundStatus(
+    def PaySwap(
         request,
         target,
         options=(),
@@ -154,9 +154,9 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/AddFundStatus",
-            swap__pb2.AddFundStatusRequest.SerializeToString,
-            swap__pb2.AddFundStatusReply.FromString,
+            "/swap.Swapper/PaySwap",
+            swap__pb2.PaySwapRequest.SerializeToString,
+            swap__pb2.PaySwapResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -169,7 +169,7 @@ class Swapper(object):
         )
 
     @staticmethod
-    def GetSwapPayment(
+    def RefundSwap(
         request,
         target,
         options=(),
@@ -184,9 +184,9 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/GetSwapPayment",
-            swap__pb2.GetSwapPaymentRequest.SerializeToString,
-            swap__pb2.GetSwapPaymentReply.FromString,
+            "/swap.Swapper/RefundSwap",
+            swap__pb2.RefundSwapRequest.SerializeToString,
+            swap__pb2.RefundSwapResponse.FromString,
             options,
             channel_credentials,
             insecure,

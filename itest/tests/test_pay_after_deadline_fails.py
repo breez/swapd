@@ -5,7 +5,7 @@ import grpc
 def test_pay_after_deadline_fails(node_factory, swapd_factory):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
-    address, payment_request, _ = add_fund_init(user, swapper)
+    address, payment_request, _ = create_swap(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
@@ -16,7 +16,7 @@ def test_pay_after_deadline_fails(node_factory, swapd_factory):
     user.bitcoin.wait_for_log(r"UpdateTip: new best=.* height={}".format(height + 216))
 
     try:
-        swapper.rpc.get_swap_payment(payment_request)
+        swapper.rpc.pay_swap(payment_request)
         assert False
     except grpc._channel._InactiveRpcError as e:
         assert e.details() == "confirmed utxo values don't match invoice value"

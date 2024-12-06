@@ -1,44 +1,45 @@
 use std::time::SystemTime;
 
+use super::privkey_provider::PrivateKeyProvider;
+use crate::chain::{FeeEstimate, Utxo};
 use bitcoin::{
     absolute::LockTime,
     hashes::{ripemd160, sha256, Hash},
     key::Secp256k1,
-    opcodes::all::{OP_CHECKSIG, OP_CSV, OP_DROP, OP_ELSE, OP_ENDIF, OP_EQUAL, OP_HASH160, OP_IF},
-    secp256k1::{All, Message, SecretKey},
-    sighash::{self, EcdsaSighashType},
+    opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CLTV, OP_EQUALVERIFY, OP_HASH160},
+    secp256k1::{All, Message, PublicKey, SecretKey},
+    sighash::{self, Prevouts},
+    taproot::{
+        LeafVersion, Signature, TaprootBuilder, TaprootSpendInfo,
+    },
     transaction::Version,
-    Address, Amount, Network, PrivateKey, PublicKey, Script, ScriptBuf, Sequence, Transaction,
-    TxIn, TxOut, Weight, Witness,
+    Address, Amount, CompressedPublicKey, Network, Script, ScriptBuf, Sequence, TapLeafHash,
+    TapSighashType, Transaction, TxIn, TxOut, Weight, Witness,
 };
 use thiserror::Error;
-use tracing::{debug, field, instrument, trace};
+use tracing::{error, field, instrument, trace};
 
-use crate::chain::{FeeEstimate, Utxo};
-
-use super::privkey_provider::PrivateKeyProvider;
-
-const REDEEM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
+// TODO: fix for taproot
+const CLAIM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
 
 #[derive(Clone, Debug)]
-pub struct RedeemableUtxo {
+pub struct ClaimableUtxo {
     pub swap: Swap,
     pub utxo: Utxo,
     pub paid_with_request: Option<String>,
     pub preimage: [u8; 32],
 }
 
-impl RedeemableUtxo {
-    pub fn blocks_left(&self, current_height: u64) -> i32 {
-        (self.swap.public.lock_time as i32)
-            - (current_height.saturating_sub(self.utxo.block_height) as i32)
-    }
-}
-
 #[derive(Debug)]
 pub struct SwapState {
     pub swap: Swap,
     pub preimage: Option<[u8; 32]>,
+}
+
+impl SwapState {
+    pub fn blocks_left(&self, current_height: u64) -> i32 {
+        self.swap.blocks_left(current_height)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -48,19 +49,26 @@ pub struct Swap {
     pub private: SwapPrivateData,
 }
 
+impl Swap {
+    pub fn blocks_left(&self, current_height: u64) -> i32 {
+        (self.public.lock_height as i64 - current_height as i64) as i32
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SwapPublicData {
-    pub payer_pubkey: PublicKey,
-    pub swapper_pubkey: PublicKey,
-    pub hash: sha256::Hash,
-    pub script: ScriptBuf,
     pub address: Address,
-    pub lock_time: u32,
+    pub claim_pubkey: PublicKey,
+    pub claim_script: ScriptBuf,
+    pub hash: sha256::Hash,
+    pub lock_height: u32,
+    pub refund_pubkey: PublicKey,
+    pub refund_script: ScriptBuf,
 }
 
 #[derive(Clone)]
 pub struct SwapPrivateData {
-    pub swapper_privkey: PrivateKey,
+    pub claim_privkey: SecretKey,
 }
 
 impl std::fmt::Debug for SwapPrivateData {
@@ -74,10 +82,13 @@ impl std::fmt::Debug for SwapPrivateData {
 #[derive(Debug)]
 pub enum CreateSwapError {
     PrivateKeyError,
+    InvalidBlockHeight,
+    InvalidTransaction,
+    Taproot(TaprootError),
 }
 
 #[derive(Debug, Error)]
-pub enum CreateRedeemTxError {
+pub enum CreateClaimTxError {
     #[error("invalid block height")]
     InvalidBlockHeight,
     #[error("invalid weight")]
@@ -94,6 +105,8 @@ pub enum CreateRedeemTxError {
     NotEnoughMemory,
     #[error("amount too low")]
     AmountTooLow,
+    #[error("taproot error: {0}")]
+    Taproot(TaprootError),
 }
 
 #[derive(Debug)]
@@ -130,67 +143,82 @@ where
     #[instrument(level = "trace", skip(self))]
     pub fn create_swap(
         &self,
-        payer_pubkey: PublicKey,
+        refund_pubkey: PublicKey,
         hash: sha256::Hash,
+        current_height: u64,
     ) -> Result<Swap, CreateSwapError> {
         let creation_time = SystemTime::now();
-        let swapper_privkey = self.privkey_provider.new_private_key().map_err(|e| {
-            debug!("error creating private key: {:?}", e);
+        let claim_privkey = self.privkey_provider.new_private_key().map_err(|e| {
+            error!("error creating private key: {:?}", e);
             CreateSwapError::PrivateKeyError
         })?;
-        let swapper_pubkey = swapper_privkey.public_key(&self.secp);
-
-        let lock_time = self.lock_time;
-
-        let script = Script::builder()
+        let claim_pubkey = claim_privkey.public_key(&self.secp);
+        let (x_only_claim_pubkey, _) = claim_pubkey.x_only_public_key();
+        let (x_only_refund_pubkey, _) = refund_pubkey.x_only_public_key();
+        let claim_script = Script::builder()
             .push_opcode(OP_HASH160)
-            .push_slice(ripemd160::Hash::hash(hash.as_byte_array()).as_byte_array())
-            .push_opcode(OP_EQUAL)
-            .push_opcode(OP_IF)
-            .push_key(&swapper_pubkey)
-            .push_opcode(OP_ELSE)
-            .push_int(lock_time as i64)
-            .push_opcode(OP_CSV)
-            .push_opcode(OP_DROP)
-            .push_key(&payer_pubkey)
-            .push_opcode(OP_ENDIF)
+            .push_slice(
+                ripemd160::Hash::hash(hash.as_byte_array()).as_byte_array(),
+            )
+            .push_opcode(OP_EQUALVERIFY)
+            .push_x_only_key(&x_only_claim_pubkey)
             .push_opcode(OP_CHECKSIG)
             .into_script();
 
-        let address = Address::p2wsh(&script, self.network);
+        let timeout_block_height = current_height as u32 + self.lock_time;
+        let lock_height = LockTime::from_height(timeout_block_height)?;
+        let refund_script = Script::builder()
+            .push_x_only_key(&x_only_refund_pubkey)
+            .push_opcode(OP_CHECKSIGVERIFY)
+            .push_lock_time(lock_height)
+            .push_opcode(OP_CLTV)
+            .into_script();
 
-        Ok(Swap {
+        let fake_address = Address::p2wpkh(
+            &CompressedPublicKey::from_slice(&[0x02; 33]).map_err(|e| {
+                error!("failed to create fake pubkey: {:?}", e);
+                CreateSwapError::PrivateKeyError
+            })?,
+            self.network,
+        );
+        let mut swap = Swap {
             creation_time,
             public: SwapPublicData {
-                payer_pubkey,
-                swapper_pubkey,
+                address: fake_address,
+                claim_pubkey,
+                claim_script,
                 hash,
-                script,
-                address,
-                lock_time,
+                lock_height: lock_height.to_consensus_u32(),
+                refund_pubkey,
+                refund_script,
             },
-            private: SwapPrivateData { swapper_privkey },
-        })
+            private: SwapPrivateData { claim_privkey },
+        };
+
+        let taproot_spend_info = self.taproot_spend_info(&swap)?;
+        swap.public.address = Address::p2tr_tweaked(taproot_spend_info.output_key(), self.network);
+
+        Ok(swap)
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub fn create_redeem_tx(
+    pub fn create_claim_tx(
         &self,
-        redeemables: &[RedeemableUtxo],
+        claimables: &[ClaimableUtxo],
         fee: &FeeEstimate,
         current_height: u64,
         destination_address: Address,
-    ) -> Result<Transaction, CreateRedeemTxError> {
+    ) -> Result<Transaction, CreateClaimTxError> {
         // Sort by outpoint to reproducibly craft the same tx.
-        let mut redeemables = redeemables.to_vec();
-        redeemables.sort_by(|a, b| a.utxo.outpoint.cmp(&b.utxo.outpoint));
-        let total_value = redeemables
+        let mut claimables = claimables.to_vec();
+        claimables.sort_by(|a, b| a.utxo.outpoint.cmp(&b.utxo.outpoint));
+        let total_value = claimables
             .iter()
-            .fold(0u64, |sum, r| sum + r.utxo.amount_sat);
+            .fold(0u64, |sum, r| sum + r.utxo.tx_out.value.to_sat());
         let mut tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::from_height(current_height as u32)?,
-            input: redeemables
+            input: claimables
                 .iter()
                 .map(|r| TxIn {
                     previous_output: r.utxo.outpoint,
@@ -208,9 +236,9 @@ where
         let weight = tx
             .weight()
             .checked_add(Weight::from_wu(
-                (REDEEM_INPUT_WITNESS_SIZE * tx.input.len()) as u64,
+                (CLAIM_INPUT_WITNESS_SIZE * tx.input.len()) as u64,
             ))
-            .ok_or(CreateRedeemTxError::InvalidWeight)?;
+            .ok_or(CreateClaimTxError::InvalidWeight)?;
         let fee_msat = weight.to_wu() * fee.sat_per_kw as u64;
         let fee_sat = (fee_msat + 999) / 1000;
         let value_after_fees_sat = total_value.saturating_sub(fee_sat);
@@ -221,70 +249,181 @@ where
                 value_after_fees_sat,
                 dust_limit_sat = self.dust_limit_sat
             );
-            return Err(CreateRedeemTxError::AmountTooLow);
+            return Err(CreateClaimTxError::AmountTooLow);
         }
         tx.output[0].value = Amount::from_sat(value_after_fees_sat);
 
-        let mut inputs = Vec::new();
-        for (n, r) in redeemables.iter().enumerate() {
+        let prevouts: Vec<TxOut> = claimables.iter().map(|u| u.utxo.tx_out.clone()).collect();
+        let prevouts = Prevouts::All(&prevouts);
+        for (n, c) in claimables.iter().enumerate() {
+            let leaf_hash =
+                TapLeafHash::from_script(&c.swap.public.claim_script, LeafVersion::TapScript);
+
             let mut sighasher = sighash::SighashCache::new(&tx);
-            let sighash = sighasher.p2wsh_signature_hash(
+            let sighash = sighasher.taproot_script_spend_signature_hash(
                 n,
-                &r.swap.public.script,
-                Amount::from_sat(r.utxo.amount_sat),
-                EcdsaSighashType::All,
+                &prevouts,
+                leaf_hash,
+                TapSighashType::All,
             )?;
+
+            let rnd = self
+                .privkey_provider
+                .new_private_key()
+                .map_err(|_| CreateClaimTxError::InvalidSecretKey)?
+                .secret_bytes();
             let msg = Message::from(sighash);
-            let secret_key = SecretKey::from_slice(&r.swap.private.swapper_privkey.to_bytes())?;
-            let mut signature = self
-                .secp
-                .sign_ecdsa(&msg, &secret_key)
-                .serialize_der()
-                .to_vec();
-            signature.push(EcdsaSighashType::All as u8);
-            let witness = vec![
+            let signature = self.secp.sign_schnorr_with_aux_rand(
+                &msg,
+                &c.swap.private.claim_privkey.keypair(&self.secp),
+                &rnd,
+            );
+            let signature = Signature {
                 signature,
-                r.preimage.to_vec(),
-                r.swap.public.script.to_bytes(),
+                sighash_type: TapSighashType::All,
+            };
+            let control_block = self
+                .taproot_spend_info(&c.swap)?
+                .control_block(&(c.swap.public.claim_script.clone(), LeafVersion::TapScript))
+                .ok_or(CreateClaimTxError::InvalidSigningData)?;
+            let witness = vec![
+                signature.to_vec(),
+                c.preimage.to_vec(),
+                c.swap.public.claim_script.to_bytes(),
+                control_block.serialize(),
             ];
-            let mut input = tx.input[n].clone();
-            input.witness = witness.into();
-            inputs.push(input);
+            tx.input[n].witness = witness.into();
         }
 
-        tx.input = inputs;
         Ok(tx)
     }
+
+    fn taproot_spend_info(&self, swap: &Swap) -> Result<TaprootSpendInfo, TaprootError> {
+        // TODO: Replace musig2 library with rust-bitcoin musig2 when available.
+        let cp = musig2::secp256k1::PublicKey::from_byte_array_compressed(
+            &swap.public.claim_pubkey.serialize(),
+        )?;
+        let rp = musig2::secp256k1::PublicKey::from_byte_array_compressed(
+            &swap.public.refund_pubkey.serialize(),
+        )?;
+        let m = musig2::KeyAggContext::new([cp, rp])?;
+        let mp: musig2::secp256k1::PublicKey = m.aggregated_pubkey();
+        let musig_pubkey = PublicKey::from_slice(&mp.serialize())?;
+        let (internal_key, _) = musig_pubkey.x_only_public_key();
+
+        // claim and refund scripts go in a taptree.
+        Ok(TaprootBuilder::new()
+            .add_leaf(1, swap.public.claim_script.clone())?
+            .add_leaf(1, swap.public.refund_script.clone())?
+            .finalize(&self.secp, internal_key)?)
+    }
 }
 
-impl From<bitcoin::absolute::ConversionError> for CreateRedeemTxError {
+#[derive(Debug, Error)]
+pub enum TaprootError {
+    #[error("musig: {0}")]
+    Musig(musig2::secp256k1::Error),
+    #[error("key agg: {0}")]
+    KeyAgg(musig2::errors::KeyAggError),
+    #[error("key: {0}")]
+    Key(bitcoin::secp256k1::Error),
+    #[error("taproot builder: {0}")]
+    TaprootBuilder(bitcoin::taproot::TaprootBuilderError),
+    #[error("could not finalize taproot spend info")]
+    Taproot(bitcoin::taproot::TaprootBuilder),
+}
+
+impl From<musig2::secp256k1::Error> for TaprootError {
+    fn from(value: musig2::secp256k1::Error) -> Self {
+        TaprootError::Musig(value)
+    }
+}
+
+impl From<musig2::errors::KeyAggError> for TaprootError {
+    fn from(value: musig2::errors::KeyAggError) -> Self {
+        TaprootError::KeyAgg(value)
+    }
+}
+
+impl From<bitcoin::secp256k1::Error> for TaprootError {
+    fn from(value: bitcoin::secp256k1::Error) -> Self {
+        TaprootError::Key(value)
+    }
+}
+
+impl From<bitcoin::taproot::TaprootBuilderError> for TaprootError {
+    fn from(value: bitcoin::taproot::TaprootBuilderError) -> Self {
+        TaprootError::TaprootBuilder(value)
+    }
+}
+
+impl From<bitcoin::taproot::TaprootBuilder> for TaprootError {
+    fn from(value: bitcoin::taproot::TaprootBuilder) -> Self {
+        TaprootError::Taproot(value)
+    }
+}
+
+impl From<bitcoin::absolute::ConversionError> for CreateSwapError {
     fn from(_value: bitcoin::absolute::ConversionError) -> Self {
-        CreateRedeemTxError::InvalidBlockHeight
+        CreateSwapError::InvalidBlockHeight
     }
 }
 
-impl From<bitcoin::blockdata::transaction::InputsIndexError> for CreateRedeemTxError {
+impl From<TaprootError> for CreateSwapError {
+    fn from(value: TaprootError) -> Self {
+        CreateSwapError::Taproot(value)
+    }
+}
+
+impl From<TaprootError> for CreateClaimTxError {
+    fn from(value: TaprootError) -> Self {
+        CreateClaimTxError::Taproot(value)
+    }
+}
+
+impl From<bitcoin::absolute::ConversionError> for CreateClaimTxError {
+    fn from(_value: bitcoin::absolute::ConversionError) -> Self {
+        CreateClaimTxError::InvalidBlockHeight
+    }
+}
+
+impl From<bitcoin::blockdata::transaction::InputsIndexError> for CreateClaimTxError {
     fn from(_value: bitcoin::blockdata::transaction::InputsIndexError) -> Self {
-        CreateRedeemTxError::InvalidSigningData
+        CreateClaimTxError::InvalidSigningData
     }
 }
 
-impl From<bitcoin::secp256k1::Error> for CreateRedeemTxError {
+impl From<bitcoin::sighash::TaprootError> for CreateClaimTxError {
+    fn from(value: bitcoin::sighash::TaprootError) -> Self {
+        trace!(taproot_error = field::debug(&value));
+        match value {
+            sighash::TaprootError::InputsIndex(_) => CreateClaimTxError::InvalidMessage,
+            sighash::TaprootError::SingleMissingOutput(_) => CreateClaimTxError::InvalidMessage,
+            sighash::TaprootError::PrevoutsSize(_) => CreateClaimTxError::InvalidMessage,
+            sighash::TaprootError::PrevoutsIndex(_) => CreateClaimTxError::InvalidMessage,
+            sighash::TaprootError::PrevoutsKind(_) => CreateClaimTxError::InvalidMessage,
+            sighash::TaprootError::InvalidSighashType(_) => CreateClaimTxError::InvalidMessage,
+            _ => CreateClaimTxError::InvalidMessage,
+        }
+    }
+}
+
+impl From<bitcoin::secp256k1::Error> for CreateClaimTxError {
     fn from(value: bitcoin::secp256k1::Error) -> Self {
         trace!(secp256k1_error = field::debug(value));
         match value {
-            bitcoin::secp256k1::Error::IncorrectSignature => CreateRedeemTxError::InvalidSignature,
-            bitcoin::secp256k1::Error::InvalidMessage => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidPublicKey => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidSignature => CreateRedeemTxError::InvalidSignature,
-            bitcoin::secp256k1::Error::InvalidSecretKey => CreateRedeemTxError::InvalidSecretKey,
-            bitcoin::secp256k1::Error::InvalidSharedSecret => CreateRedeemTxError::InvalidSecretKey,
-            bitcoin::secp256k1::Error::InvalidRecoveryId => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidTweak => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::NotEnoughMemory => CreateRedeemTxError::NotEnoughMemory,
-            bitcoin::secp256k1::Error::InvalidPublicKeySum => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidParityValue(_) => CreateRedeemTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidEllSwift => CreateRedeemTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::IncorrectSignature => CreateClaimTxError::InvalidSignature,
+            bitcoin::secp256k1::Error::InvalidMessage => CreateClaimTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidPublicKey => CreateClaimTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidSignature => CreateClaimTxError::InvalidSignature,
+            bitcoin::secp256k1::Error::InvalidSecretKey => CreateClaimTxError::InvalidSecretKey,
+            bitcoin::secp256k1::Error::InvalidSharedSecret => CreateClaimTxError::InvalidSecretKey,
+            bitcoin::secp256k1::Error::InvalidRecoveryId => CreateClaimTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidTweak => CreateClaimTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::NotEnoughMemory => CreateClaimTxError::NotEnoughMemory,
+            bitcoin::secp256k1::Error::InvalidPublicKeySum => CreateClaimTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidParityValue(_) => CreateClaimTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidEllSwift => CreateClaimTxError::InvalidMessage,
         }
     }
 }

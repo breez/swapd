@@ -6,7 +6,10 @@ authors = [
     { name = "Jesse de Wit", email = "witdejesse@hotmail.com" }
 ]
 license = {text = "MIT"}
+# Python >=3.10 required for the bitcoin-utils package.
+requires-python = ">= 3.10"
 dependencies = [
+    'bitcoin-utils == 0.7.1',
     'black == 24.8.0',
     'docker == 7.1.0',
     'grpcio == 1.68.1',

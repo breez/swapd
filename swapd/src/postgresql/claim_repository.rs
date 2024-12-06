@@ -12,54 +12,54 @@ use futures::TryStreamExt;
 use sqlx::{PgPool, Row};
 use tracing::instrument;
 
-use crate::redeem::{self, Redeem, RedeemRepositoryError};
+use crate::claim::{self, Claim, ClaimRepositoryError};
 
-pub struct RedeemRepository {
+pub struct ClaimRepository {
     network: Network,
     pool: Arc<PgPool>,
 }
 
-impl RedeemRepository {
+impl ClaimRepository {
     pub fn new(pool: Arc<PgPool>, network: Network) -> Self {
         Self { pool, network }
     }
 }
 
 #[async_trait::async_trait]
-impl redeem::RedeemRepository for RedeemRepository {
+impl claim::ClaimRepository for ClaimRepository {
     #[instrument(level = "trace", skip(self))]
-    async fn add_redeem(&self, redeem: &Redeem) -> Result<(), RedeemRepositoryError> {
-        let tx_id = redeem.tx.compute_txid().to_string();
+    async fn add_claim(&self, claim: &Claim) -> Result<(), ClaimRepositoryError> {
+        let tx_id = claim.tx.compute_txid().to_string();
         let mut tx: Vec<u8> = Vec::new();
-        redeem.tx.consensus_encode(&mut tx)?;
+        claim.tx.consensus_encode(&mut tx)?;
         let mut db_tx = self.pool.begin().await?;
         sqlx::query(
-            r#"INSERT INTO redeems (tx_id, creation_time, tx, destination_address, fee_per_kw, auto_bump)
+            r#"INSERT INTO claims (tx_id, creation_time, tx, destination_address, fee_per_kw, auto_bump)
                VALUES ($1, $2, $3, $4, $5, $6)"#,
         )
         .bind(&tx_id)
-        .bind(redeem.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+        .bind(claim.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
         .bind(tx)
-        .bind(redeem.destination_address.to_string())
-        .bind(redeem.fee_per_kw as i64)
-        .bind(redeem.auto_bump)
+        .bind(claim.destination_address.to_string())
+        .bind(claim.fee_per_kw as i64)
+        .bind(claim.auto_bump)
         .execute(&mut *db_tx)
         .await?;
 
-        let input_tx_ids: Vec<_> = redeem
+        let input_tx_ids: Vec<_> = claim
             .tx
             .input
             .iter()
             .map(|i| i.previous_output.txid.to_string())
             .collect();
-        let input_tx_outnums: Vec<_> = redeem
+        let input_tx_outnums: Vec<_> = claim
             .tx
             .input
             .iter()
             .map(|i| i.previous_output.vout as i64)
             .collect();
         sqlx::query(
-            r#"INSERT INTO redeem_inputs (redeem_tx_id, tx_id, output_index)
+            r#"INSERT INTO claim_inputs (claim_tx_id, tx_id, output_index)
                SELECT $1, t.tx_id, t.output_index
                FROM UNNEST($2::text[], $3::bigint[]) 
                    AS t(tx_id, output_index)"#,
@@ -73,25 +73,22 @@ impl redeem::RedeemRepository for RedeemRepository {
         Ok(())
     }
 
-    /// Get all redeems where the inputs haven't been spent yet, sorted by fee
+    /// Get all claims where the inputs haven't been spent yet, sorted by fee
     /// rate desc, then creation time desc.
     #[instrument(level = "trace", skip(self))]
-    async fn get_redeems(
-        &self,
-        outpoints: &[OutPoint],
-    ) -> Result<Vec<Redeem>, RedeemRepositoryError> {
+    async fn get_claims(&self, outpoints: &[OutPoint]) -> Result<Vec<Claim>, ClaimRepositoryError> {
         // NOTE: This query violates the separation principle of separating
-        // chain and redeem logic.
+        // chain and claim logic.
         let mut rows = sqlx::query(
             r#"SELECT r.creation_time
                ,      r.tx
                ,      r.destination_address
                ,      r.fee_per_kw
                ,      r.auto_bump
-               FROM redeems r
+               FROM claims r
                WHERE tx_id IN (
-                   SELECT ri.redeem_tx_id
-                   FROM redeem_inputs ri
+                   SELECT ri.claim_tx_id
+                   FROM claim_inputs ri
                    WHERE ri.tx_id NOT IN (
                        SELECT ti.tx_id
                        FROM tx_inputs ti
@@ -113,8 +110,8 @@ impl redeem::RedeemRepository for RedeemRepository {
 
             let creation_time = SystemTime::UNIX_EPOCH
                 .checked_add(Duration::from_secs(creation_time as u64))
-                .ok_or(RedeemRepositoryError::InvalidTimestamp)?;
-            result.push(Redeem {
+                .ok_or(ClaimRepositoryError::InvalidTimestamp)?;
+            result.push(Claim {
                 creation_time,
                 destination_address: destination_address
                     .parse::<Address<NetworkUnchecked>>()?
@@ -129,44 +126,44 @@ impl redeem::RedeemRepository for RedeemRepository {
     }
 }
 
-impl From<bitcoin::address::ParseError> for RedeemRepositoryError {
+impl From<bitcoin::address::ParseError> for ClaimRepositoryError {
     fn from(value: bitcoin::address::ParseError) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::hashes::hex::HexToArrayError> for RedeemRepositoryError {
+impl From<bitcoin::hashes::hex::HexToArrayError> for ClaimRepositoryError {
     fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<sqlx::Error> for RedeemRepositoryError {
+impl From<sqlx::Error> for ClaimRepositoryError {
     fn from(value: sqlx::Error) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<std::io::Error> for RedeemRepositoryError {
+impl From<std::io::Error> for ClaimRepositoryError {
     fn from(value: std::io::Error) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<std::time::SystemTimeError> for RedeemRepositoryError {
+impl From<std::time::SystemTimeError> for ClaimRepositoryError {
     fn from(value: std::time::SystemTimeError) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::io::Error> for RedeemRepositoryError {
+impl From<bitcoin::io::Error> for ClaimRepositoryError {
     fn from(value: bitcoin::io::Error) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::consensus::encode::Error> for RedeemRepositoryError {
+impl From<bitcoin::consensus::encode::Error> for ClaimRepositoryError {
     fn from(value: bitcoin::consensus::encode::Error) -> Self {
-        RedeemRepositoryError::General(Box::new(value))
+        ClaimRepositoryError::General(Box::new(value))
     }
 }

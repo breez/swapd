@@ -40,37 +40,37 @@ class SwapManagerStub(object):
         self.AddAddressFilters = channel.unary_unary(
             "/swap_internal.SwapManager/AddAddressFilters",
             request_serializer=swap__internal__pb2.AddAddressFiltersRequest.SerializeToString,
-            response_deserializer=swap__internal__pb2.AddAddressFiltersReply.FromString,
+            response_deserializer=swap__internal__pb2.AddAddressFiltersResponse.FromString,
             _registered_method=True,
         )
         self.GetInfo = channel.unary_unary(
             "/swap_internal.SwapManager/GetInfo",
             request_serializer=swap__internal__pb2.GetInfoRequest.SerializeToString,
-            response_deserializer=swap__internal__pb2.GetInfoReply.FromString,
+            response_deserializer=swap__internal__pb2.GetInfoResponse.FromString,
             _registered_method=True,
         )
         self.GetSwap = channel.unary_unary(
             "/swap_internal.SwapManager/GetSwap",
             request_serializer=swap__internal__pb2.GetSwapRequest.SerializeToString,
-            response_deserializer=swap__internal__pb2.GetSwapReply.FromString,
+            response_deserializer=swap__internal__pb2.GetSwapResponse.FromString,
             _registered_method=True,
         )
-        self.ListRedeemable = channel.unary_unary(
-            "/swap_internal.SwapManager/ListRedeemable",
-            request_serializer=swap__internal__pb2.ListRedeemableRequest.SerializeToString,
-            response_deserializer=swap__internal__pb2.ListRedeemableReply.FromString,
+        self.ListClaimable = channel.unary_unary(
+            "/swap_internal.SwapManager/ListClaimable",
+            request_serializer=swap__internal__pb2.ListClaimableRequest.SerializeToString,
+            response_deserializer=swap__internal__pb2.ListClaimableResponse.FromString,
             _registered_method=True,
         )
-        self.Redeem = channel.unary_unary(
-            "/swap_internal.SwapManager/Redeem",
-            request_serializer=swap__internal__pb2.RedeemRequest.SerializeToString,
-            response_deserializer=swap__internal__pb2.RedeemReply.FromString,
+        self.Claim = channel.unary_unary(
+            "/swap_internal.SwapManager/Claim",
+            request_serializer=swap__internal__pb2.ClaimRequest.SerializeToString,
+            response_deserializer=swap__internal__pb2.ClaimResponse.FromString,
             _registered_method=True,
         )
         self.Stop = channel.unary_unary(
             "/swap_internal.SwapManager/Stop",
             request_serializer=swap__internal__pb2.StopRequest.SerializeToString,
-            response_deserializer=swap__internal__pb2.StopReply.FromString,
+            response_deserializer=swap__internal__pb2.StopResponse.FromString,
             _registered_method=True,
         )
 
@@ -96,13 +96,13 @@ class SwapManagerServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def ListRedeemable(self, request, context):
+    def ListClaimable(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def Redeem(self, request, context):
+    def Claim(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
@@ -120,32 +120,32 @@ def add_SwapManagerServicer_to_server(servicer, server):
         "AddAddressFilters": grpc.unary_unary_rpc_method_handler(
             servicer.AddAddressFilters,
             request_deserializer=swap__internal__pb2.AddAddressFiltersRequest.FromString,
-            response_serializer=swap__internal__pb2.AddAddressFiltersReply.SerializeToString,
+            response_serializer=swap__internal__pb2.AddAddressFiltersResponse.SerializeToString,
         ),
         "GetInfo": grpc.unary_unary_rpc_method_handler(
             servicer.GetInfo,
             request_deserializer=swap__internal__pb2.GetInfoRequest.FromString,
-            response_serializer=swap__internal__pb2.GetInfoReply.SerializeToString,
+            response_serializer=swap__internal__pb2.GetInfoResponse.SerializeToString,
         ),
         "GetSwap": grpc.unary_unary_rpc_method_handler(
             servicer.GetSwap,
             request_deserializer=swap__internal__pb2.GetSwapRequest.FromString,
-            response_serializer=swap__internal__pb2.GetSwapReply.SerializeToString,
+            response_serializer=swap__internal__pb2.GetSwapResponse.SerializeToString,
         ),
-        "ListRedeemable": grpc.unary_unary_rpc_method_handler(
-            servicer.ListRedeemable,
-            request_deserializer=swap__internal__pb2.ListRedeemableRequest.FromString,
-            response_serializer=swap__internal__pb2.ListRedeemableReply.SerializeToString,
+        "ListClaimable": grpc.unary_unary_rpc_method_handler(
+            servicer.ListClaimable,
+            request_deserializer=swap__internal__pb2.ListClaimableRequest.FromString,
+            response_serializer=swap__internal__pb2.ListClaimableResponse.SerializeToString,
         ),
-        "Redeem": grpc.unary_unary_rpc_method_handler(
-            servicer.Redeem,
-            request_deserializer=swap__internal__pb2.RedeemRequest.FromString,
-            response_serializer=swap__internal__pb2.RedeemReply.SerializeToString,
+        "Claim": grpc.unary_unary_rpc_method_handler(
+            servicer.Claim,
+            request_deserializer=swap__internal__pb2.ClaimRequest.FromString,
+            response_serializer=swap__internal__pb2.ClaimResponse.SerializeToString,
         ),
         "Stop": grpc.unary_unary_rpc_method_handler(
             servicer.Stop,
             request_deserializer=swap__internal__pb2.StopRequest.FromString,
-            response_serializer=swap__internal__pb2.StopReply.SerializeToString,
+            response_serializer=swap__internal__pb2.StopResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -179,7 +179,7 @@ class SwapManager(object):
             target,
             "/swap_internal.SwapManager/AddAddressFilters",
             swap__internal__pb2.AddAddressFiltersRequest.SerializeToString,
-            swap__internal__pb2.AddAddressFiltersReply.FromString,
+            swap__internal__pb2.AddAddressFiltersResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -209,7 +209,7 @@ class SwapManager(object):
             target,
             "/swap_internal.SwapManager/GetInfo",
             swap__internal__pb2.GetInfoRequest.SerializeToString,
-            swap__internal__pb2.GetInfoReply.FromString,
+            swap__internal__pb2.GetInfoResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -239,7 +239,7 @@ class SwapManager(object):
             target,
             "/swap_internal.SwapManager/GetSwap",
             swap__internal__pb2.GetSwapRequest.SerializeToString,
-            swap__internal__pb2.GetSwapReply.FromString,
+            swap__internal__pb2.GetSwapResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -252,7 +252,7 @@ class SwapManager(object):
         )
 
     @staticmethod
-    def ListRedeemable(
+    def ListClaimable(
         request,
         target,
         options=(),
@@ -267,9 +267,9 @@ class SwapManager(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap_internal.SwapManager/ListRedeemable",
-            swap__internal__pb2.ListRedeemableRequest.SerializeToString,
-            swap__internal__pb2.ListRedeemableReply.FromString,
+            "/swap_internal.SwapManager/ListClaimable",
+            swap__internal__pb2.ListClaimableRequest.SerializeToString,
+            swap__internal__pb2.ListClaimableResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -282,7 +282,7 @@ class SwapManager(object):
         )
 
     @staticmethod
-    def Redeem(
+    def Claim(
         request,
         target,
         options=(),
@@ -297,9 +297,9 @@ class SwapManager(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap_internal.SwapManager/Redeem",
-            swap__internal__pb2.RedeemRequest.SerializeToString,
-            swap__internal__pb2.RedeemReply.FromString,
+            "/swap_internal.SwapManager/Claim",
+            swap__internal__pb2.ClaimRequest.SerializeToString,
+            swap__internal__pb2.ClaimResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -329,7 +329,7 @@ class SwapManager(object):
             target,
             "/swap_internal.SwapManager/Stop",
             swap__internal__pb2.StopRequest.SerializeToString,
-            swap__internal__pb2.StopReply.FromString,
+            swap__internal__pb2.StopResponse.FromString,
             options,
             channel_credentials,
             insecure,

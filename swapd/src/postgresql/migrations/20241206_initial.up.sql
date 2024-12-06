@@ -4,15 +4,16 @@
 */
 
 CREATE TABLE swaps (
-    payment_hash BYTEA NOT NULL PRIMARY KEY,
-    creation_time BIGINT NOT NULL,
-    payer_pubkey BYTEA NOT NULL,
-    swapper_pubkey BYTEA NOT NULL,
-    script BYTEA NOT NULL,
     address VARCHAR NOT NULL,
-    lock_time BIGINT NOT NULL,
-    swapper_privkey BYTEA NOT NULL, -- TODO: encrypt?
-    preimage BYTEA NULL
+    claim_privkey BYTEA NOT NULL, -- TODO: encrypt?
+    claim_pubkey BYTEA NOT NULL,
+    claim_script BYTEA NOT NULL,
+    creation_time BIGINT NOT NULL,
+    lock_height BIGINT NOT NULL,
+    payment_hash BYTEA NOT NULL PRIMARY KEY,
+    preimage BYTEA NULL,
+    refund_pubkey BYTEA NOT NULL,
+    refund_script BYTEA NOT NULL
 );
 
 CREATE INDEX swaps_address_idx ON swaps (address);
@@ -103,9 +104,9 @@ CREATE TABLE filter_addresses (
 );
 
 /*
-    redeem
+    claim
 */
-CREATE TABLE redeems (
+CREATE TABLE claims (
     tx_id VARCHAR NOT NULL PRIMARY KEY,
     creation_time BIGINT NOT NULL,
     tx BYTEA NOT NULL,
@@ -114,11 +115,16 @@ CREATE TABLE redeems (
     auto_bump BOOLEAN NOT NULL
 );
 
-CREATE INDEX redeems_swap_hash_creation_time ON redeems(creation_time);
+CREATE INDEX claims_swap_hash_creation_time ON claims(creation_time);
 
-CREATE TABLE redeem_inputs (
-    redeem_tx_id VARCHAR NOT NULL REFERENCES redeems,
+CREATE TABLE claim_inputs (
+    claim_tx_id VARCHAR NOT NULL REFERENCES claims,
     tx_id VARCHAR NOT NULL,
     output_index BIGINT NOT NULL
 );
-CREATE INDEX redeem_inputs_redeem_tx_id_idx ON redeem_inputs(redeem_tx_id);
+CREATE INDEX claim_inputs_claim_tx_id_idx ON claim_inputs(claim_tx_id);
+
+CREATE TABLE lnd_payments (
+    payment_index BIGINT NOT NULL PRIMARY KEY,
+    label VARCHAR NOT NULL
+);

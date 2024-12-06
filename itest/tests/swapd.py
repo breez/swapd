@@ -29,13 +29,13 @@ SWAPD_CONFIG = OrderedDict(
     {
         "log-level": "swapd=trace,sqlx::query=debug,reqwest=debug,info",
         "chain-poll-interval-seconds": "1",
-        "redeem-poll-interval-seconds": "1",
+        "claim-poll-interval-seconds": "1",
         "preimage-poll-interval-seconds": "1",
         "whatthefee-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
         "lock-time": "288",
         "min-confirmations": "1",
-        "min-redeem-blocks": "72",
+        "min-claim-blocks": "72",
         "dust-limit-sat": "546",
     }
 )
@@ -276,14 +276,16 @@ class SwapperGrpc(object):
         self.channel = grpc.insecure_channel(f"{host}:{port}")
         self.stub = SwapperStub(self.channel)
 
-    def add_fund_init(self, lightning_node, pubkey, hash):
+    def create_swap(self, lightning_node, refund_pubkey, hash):
         node_id = lightning_node.info["id"]
-        payload = swap_pb2.AddFundInitRequest(nodeID=node_id, pubkey=pubkey, hash=hash)
-        return self.stub.AddFundInit(payload)
+        payload = swap_pb2.CreateSwapRequest(
+            hash=hash, refund_pubkey=bytes.fromhex(refund_pubkey)
+        )
+        return self.stub.CreateSwap(payload)
 
-    def get_swap_payment(self, payment_request):
-        payload = swap_pb2.GetSwapPaymentRequest(paymentRequest=payment_request)
-        return self.stub.GetSwapPayment(payload)
+    def pay_swap(self, payment_request):
+        payload = swap_pb2.PaySwapRequest(payment_request=payment_request)
+        return self.stub.PaySwap(payload)
 
 
 class SwapManagerGrpc(object):

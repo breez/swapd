@@ -1,13 +1,13 @@
 mod chain_filter_repository;
 mod chain_repository;
+mod claim_repository;
 mod lnd_repository;
-mod redeem_repository;
 mod swap_repository;
 
 pub use chain_filter_repository::ChainFilterRepository;
 pub use chain_repository::ChainRepository;
+pub use claim_repository::ClaimRepository;
 pub use lnd_repository::LndRepository;
-pub use redeem_repository::RedeemRepository;
 use sqlx::{Pool, Postgres};
 pub use swap_repository::SwapRepository;
 

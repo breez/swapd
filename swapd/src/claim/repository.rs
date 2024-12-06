@@ -4,7 +4,7 @@ use bitcoin::{Address, OutPoint, Transaction};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
-pub struct Redeem {
+pub struct Claim {
     pub creation_time: SystemTime,
     pub tx: Transaction,
     pub destination_address: Address,
@@ -13,7 +13,7 @@ pub struct Redeem {
 }
 
 #[derive(Debug, Error)]
-pub enum RedeemRepositoryError {
+pub enum ClaimRepositoryError {
     #[error("invalid timestamp")]
     InvalidTimestamp,
     #[error("{0}")]
@@ -21,13 +21,10 @@ pub enum RedeemRepositoryError {
 }
 
 #[async_trait::async_trait]
-pub trait RedeemRepository {
-    async fn add_redeem(&self, redeem: &Redeem) -> Result<(), RedeemRepositoryError>;
+pub trait ClaimRepository {
+    async fn add_claim(&self, claim: &Claim) -> Result<(), ClaimRepositoryError>;
 
-    /// Get all redeems where the inputs haven't been spent yet, sorted by fee
+    /// Get all claims where the inputs haven't been spent yet, sorted by fee
     /// rate desc, then creation time desc.
-    async fn get_redeems(
-        &self,
-        outpoints: &[OutPoint],
-    ) -> Result<Vec<Redeem>, RedeemRepositoryError>;
+    async fn get_claims(&self, outpoints: &[OutPoint]) -> Result<Vec<Claim>, ClaimRepositoryError>;
 }

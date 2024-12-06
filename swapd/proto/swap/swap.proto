@@ -2,57 +2,35 @@ syntax = "proto3";
 package swap;
 
 service Swapper {
-    rpc AddFundInit (AddFundInitRequest) returns (AddFundInitReply) {}
-    rpc AddFundStatus (AddFundStatusRequest) returns (AddFundStatusReply) {}
-    rpc GetSwapPayment (GetSwapPaymentRequest) returns (GetSwapPaymentReply) {}
+    rpc CreateSwap (CreateSwapRequest) returns (CreateSwapResponse) {}
+    rpc PaySwap (PaySwapRequest) returns (PaySwapResponse) {}
+    rpc RefundSwap (RefundSwapRequest) returns (RefundSwapResponse) {}
 }
 
-message AddFundInitRequest {
-    string nodeID = 1;
-    string notificationToken = 2;
-    bytes pubkey = 3;
-    bytes hash = 4;
+message CreateSwapRequest {
+    bytes hash = 1;
+    bytes refund_pubkey = 2;
 }
   
-message AddFundInitReply {
+message CreateSwapResponse {
     string address = 1;
-    bytes pubkey = 2;
-    int64 lockHeight = 3;
-    int64 maxAllowedDeposit = 4;
-    string errorMessage = 5;
-    // int64 requiredReserve = 6;
-    int64 minAllowedDeposit = 7;
-}
-  
-message AddFundStatusRequest {
-    repeated string addresses = 1;
-    string notificationToken = 2;
-}
-  
-message AddFundStatusReply {
-    map<string, AddressStatus> statuses = 1;  
+    bytes claim_pubkey = 2;
+    uint32 lock_height = 3;
 }
 
-message AddressStatus {
-    string tx = 1;
-    int64 amount = 2;
-    bool confirmed = 3;
-    string blockHash = 4;
+message PaySwapRequest {
+    string payment_request = 1;
 }
 
-message GetSwapPaymentRequest {
-    string paymentRequest = 1;
-}
-  
-message GetSwapPaymentReply {
-    string paymentError = 1;
-    SwapError swap_error = 3;
+message PaySwapResponse {}
+
+message RefundSwapRequest {
+    bytes nonce = 1;
+    bytes transaction = 2;
+    uint32 input_index = 3;
 }
 
-enum SwapError {
-    NO_ERROR = 0;
-    FUNDS_EXCEED_LIMIT = 1;
-    TX_TOO_SMALL = 2;
-    INVOICE_AMOUNT_MISMATCH = 3;
-    SWAP_EXPIRED = 4;
+message RefundSwapResponse {
+    bytes nonce = 1;
+    bytes partial_signature = 2;
 }
