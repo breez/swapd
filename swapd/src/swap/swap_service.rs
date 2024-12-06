@@ -1,14 +1,15 @@
 use std::time::SystemTime;
 
 use bitcoin::{
-    absolute::{self, LockTime},
+    absolute::LockTime,
     hashes::{ripemd160, sha256, Hash},
     key::Secp256k1,
     opcodes::all::{OP_CHECKSIG, OP_CSV, OP_DROP, OP_ELSE, OP_ENDIF, OP_EQUAL, OP_HASH160, OP_IF},
     secp256k1::{All, Message, SecretKey},
     sighash::{self, EcdsaSighashType},
-    Address, Network, PrivateKey, PublicKey, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
-    Weight, Witness,
+    transaction::Version,
+    Address, Amount, Network, PrivateKey, PublicKey, Script, ScriptBuf, Sequence, Transaction,
+    TxIn, TxOut, Weight, Witness,
 };
 use thiserror::Error;
 use tracing::{debug, field, instrument, trace};
@@ -187,7 +188,7 @@ where
             .iter()
             .fold(0u64, |sum, r| sum + r.utxo.amount_sat);
         let mut tx = Transaction {
-            version: 2,
+            version: Version::TWO,
             lock_time: LockTime::from_height(current_height as u32)?,
             input: redeemables
                 .iter()
@@ -200,7 +201,7 @@ where
                 .collect(),
             output: vec![TxOut {
                 script_pubkey: destination_address.into(),
-                value: total_value,
+                value: Amount::from_sat(total_value),
             }],
         };
 
@@ -222,15 +223,15 @@ where
             );
             return Err(CreateRedeemTxError::AmountTooLow);
         }
-        tx.output[0].value = value_after_fees_sat;
+        tx.output[0].value = Amount::from_sat(value_after_fees_sat);
 
         let mut inputs = Vec::new();
         for (n, r) in redeemables.iter().enumerate() {
             let mut sighasher = sighash::SighashCache::new(&tx);
-            let sighash = sighasher.segwit_signature_hash(
+            let sighash = sighasher.p2wsh_signature_hash(
                 n,
                 &r.swap.public.script,
-                r.utxo.amount_sat,
+                Amount::from_sat(r.utxo.amount_sat),
                 EcdsaSighashType::All,
             )?;
             let msg = Message::from(sighash);
@@ -256,14 +257,14 @@ where
     }
 }
 
-impl From<absolute::Error> for CreateRedeemTxError {
-    fn from(_value: absolute::Error) -> Self {
+impl From<bitcoin::absolute::ConversionError> for CreateRedeemTxError {
+    fn from(_value: bitcoin::absolute::ConversionError) -> Self {
         CreateRedeemTxError::InvalidBlockHeight
     }
 }
 
-impl From<sighash::Error> for CreateRedeemTxError {
-    fn from(_value: sighash::Error) -> Self {
+impl From<bitcoin::blockdata::transaction::InputsIndexError> for CreateRedeemTxError {
+    fn from(_value: bitcoin::blockdata::transaction::InputsIndexError) -> Self {
         CreateRedeemTxError::InvalidSigningData
     }
 }
@@ -283,6 +284,7 @@ impl From<bitcoin::secp256k1::Error> for CreateRedeemTxError {
             bitcoin::secp256k1::Error::NotEnoughMemory => CreateRedeemTxError::NotEnoughMemory,
             bitcoin::secp256k1::Error::InvalidPublicKeySum => CreateRedeemTxError::InvalidMessage,
             bitcoin::secp256k1::Error::InvalidParityValue(_) => CreateRedeemTxError::InvalidMessage,
+            bitcoin::secp256k1::Error::InvalidEllSwift => CreateRedeemTxError::InvalidMessage,
         }
     }
 }

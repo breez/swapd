@@ -420,14 +420,14 @@ impl chain::ChainRepository for ChainRepository {
     }
 }
 
-impl From<bitcoin::address::Error> for ChainRepositoryError {
-    fn from(value: bitcoin::address::Error) -> Self {
+impl From<bitcoin::address::ParseError> for ChainRepositoryError {
+    fn from(value: bitcoin::address::ParseError) -> Self {
         ChainRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for ChainRepositoryError {
-    fn from(value: bitcoin::hashes::hex::Error) -> Self {
+impl From<bitcoin::hashes::hex::HexToArrayError> for ChainRepositoryError {
+    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
         ChainRepositoryError::General(Box::new(value))
     }
 }
