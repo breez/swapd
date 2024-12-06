@@ -12,15 +12,15 @@ use tracing::{instrument, warn};
 use crate::{
     chain::{ChainClient, ChainRepository, FeeEstimate, FeeEstimator},
     chain_filter::ChainFilterRepository,
-    redeem::{RedeemError, RedeemRepository, RedeemService, RedeemServiceError},
+    claim::{ClaimError, ClaimRepository, ClaimService, ClaimServiceError},
     swap::{GetSwapsError, PrivateKeyProvider, SwapRepository},
     wallet::{Wallet, WalletError},
 };
 
 use internal_swap_api::{
-    swap_manager_server::SwapManager, AddAddressFiltersReply, AddAddressFiltersRequest,
-    GetInfoReply, GetInfoRequest, GetSwapReply, GetSwapRequest, ListRedeemableReply,
-    ListRedeemableRequest, RedeemReply, RedeemRequest, RedeemableUtxo, StopReply, StopRequest,
+    swap_manager_server::SwapManager, AddAddressFiltersRequest, AddAddressFiltersResponse,
+    ClaimRequest, ClaimResponse, ClaimableUtxo, GetInfoRequest, GetInfoResponse, GetSwapRequest,
+    GetSwapResponse, ListClaimableRequest, ListClaimableResponse, StopRequest, StopResponse,
     SwapOutput,
 };
 
@@ -36,7 +36,7 @@ where
     CR: ChainRepository,
     F: FeeEstimator,
     P: PrivateKeyProvider,
-    RR: RedeemRepository,
+    RR: ClaimRepository,
     SR: SwapRepository,
     W: Wallet,
 {
@@ -45,7 +45,7 @@ where
     pub chain_repository: Arc<CR>,
     pub fee_estimator: Arc<F>,
     pub network: Network,
-    pub redeem_service: Arc<RedeemService<CC, CR, RR, SR, P>>,
+    pub claim_service: Arc<ClaimService<CC, CR, RR, SR, P>>,
     pub swap_repository: Arc<SR>,
     pub token: CancellationToken,
     pub wallet: Arc<W>,
@@ -59,7 +59,7 @@ where
     CR: ChainRepository,
     F: FeeEstimator,
     P: PrivateKeyProvider,
-    RR: RedeemRepository,
+    RR: ClaimRepository,
     SR: SwapRepository,
     W: Wallet,
 {
@@ -68,7 +68,7 @@ where
     chain_repository: Arc<CR>,
     fee_estimator: Arc<F>,
     network: Network,
-    redeem_service: Arc<RedeemService<CC, CR, RR, SR, P>>,
+    claim_service: Arc<ClaimService<CC, CR, RR, SR, P>>,
     swap_repository: Arc<SR>,
     token: CancellationToken,
     wallet: Arc<W>,
@@ -81,7 +81,7 @@ where
     CR: ChainRepository,
     F: FeeEstimator,
     P: PrivateKeyProvider,
-    RR: RedeemRepository,
+    RR: ClaimRepository,
     SR: SwapRepository,
     W: Wallet,
 {
@@ -92,7 +92,7 @@ where
             chain_repository: params.chain_repository,
             fee_estimator: params.fee_estimator,
             network: params.network,
-            redeem_service: params.redeem_service,
+            claim_service: params.claim_service,
             swap_repository: params.swap_repository,
             token: params.token,
             wallet: params.wallet,
@@ -108,7 +108,7 @@ where
     CR: ChainRepository + Send + Sync + 'static,
     F: FeeEstimator + Send + Sync + 'static,
     P: PrivateKeyProvider + Send + Sync + 'static,
-    RR: RedeemRepository + Send + Sync + 'static,
+    RR: ClaimRepository + Send + Sync + 'static,
     SR: SwapRepository + Send + Sync + 'static,
     W: Wallet + Send + Sync + 'static,
 {
@@ -116,7 +116,7 @@ where
     async fn add_address_filters(
         &self,
         request: Request<AddAddressFiltersRequest>,
-    ) -> Result<Response<AddAddressFiltersReply>, Status> {
+    ) -> Result<Response<AddAddressFiltersResponse>, Status> {
         let req = request.into_inner();
         let addresses: Vec<Address<NetworkChecked>> = req
             .addresses
@@ -152,16 +152,16 @@ where
             .add_filter_addresses(&addresses)
             .await
             .map_err(|e| Status::internal(format!("failed to insert addresses: {:?}", e)))?;
-        Ok(Response::new(AddAddressFiltersReply {}))
+        Ok(Response::new(AddAddressFiltersResponse {}))
     }
 
     #[instrument(skip(self), level = "debug")]
     async fn get_info(
         &self,
         _request: Request<GetInfoRequest>,
-    ) -> Result<Response<GetInfoReply>, Status> {
+    ) -> Result<Response<GetInfoResponse>, Status> {
         let tip = self.chain_repository.get_tip().await?;
-        Ok(Response::new(GetInfoReply {
+        Ok(Response::new(GetInfoResponse {
             block_height: tip.map(|tip| tip.height).unwrap_or(0u64),
             network: self.network.to_string(),
         }))
@@ -171,7 +171,7 @@ where
     async fn get_swap(
         &self,
         request: Request<GetSwapRequest>,
-    ) -> Result<Response<GetSwapReply>, Status> {
+    ) -> Result<Response<GetSwapResponse>, Status> {
         let request = request.into_inner();
         let swap = match (
             request.address,
@@ -235,13 +235,14 @@ where
             .get_utxos_for_address(&swap.swap.public.address)
             .await
             .map_err(|e| Status::internal(format!("{:?}", e)))?;
-        let reply = GetSwapReply {
+        let reply = GetSwapResponse {
             address: swap.swap.public.address.to_string(),
             outputs: utxos
                 .iter()
                 .map(|utxo| SwapOutput {
                     confirmation_height: Some(utxo.block_height),
                     outpoint: utxo.outpoint.to_string(),
+                    block_hash: Some(utxo.block_hash.to_string()),
                 })
                 .collect(),
         };
@@ -249,21 +250,22 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn list_redeemable(
+    async fn list_claimable(
         &self,
-        _request: Request<ListRedeemableRequest>,
-    ) -> Result<Response<ListRedeemableReply>, Status> {
+        _request: Request<ListClaimableRequest>,
+    ) -> Result<Response<ListClaimableResponse>, Status> {
         let current_height = self.chain_client.get_blockheight().await?;
-        let redeemables = self.redeem_service.list_redeemable().await?;
-        Ok(Response::new(ListRedeemableReply {
-            redeemables: redeemables
+        let claimables = self.claim_service.list_claimable().await?;
+        Ok(Response::new(ListClaimableResponse {
+            claimables: claimables
                 .into_iter()
-                .map(|r| RedeemableUtxo {
+                .map(|r| ClaimableUtxo {
                     outpoint: r.utxo.outpoint.to_string(),
                     swap_hash: r.swap.public.hash.to_string(),
-                    lock_time: r.swap.public.lock_time,
+                    lock_height: r.swap.public.lock_height,
                     confirmation_height: r.utxo.block_height,
-                    blocks_left: r.blocks_left(current_height),
+                    block_hash: r.utxo.block_hash.to_string(),
+                    blocks_left: r.swap.blocks_left(current_height),
                     paid_with_request: r.paid_with_request,
                 })
                 .collect(),
@@ -271,19 +273,19 @@ where
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn redeem(
+    async fn claim(
         &self,
-        request: Request<RedeemRequest>,
-    ) -> Result<Response<RedeemReply>, Status> {
+        request: Request<ClaimRequest>,
+    ) -> Result<Response<ClaimResponse>, Status> {
         let request = request.into_inner();
-        let all_redeemables = self.redeem_service.list_redeemable().await?;
-        let mut redeemables = Vec::new();
+        let all_claimables = self.claim_service.list_claimable().await?;
+        let mut claimables = Vec::new();
         for outpoint in request.outpoints {
             let outpoint: OutPoint = outpoint
                 .parse()
                 .map_err(|_| Status::invalid_argument(format!("invalid outpoint {}", outpoint)))?;
-            let redeemable = match all_redeemables.iter().find(|r| r.utxo.outpoint == outpoint) {
-                Some(redeemable) => redeemable,
+            let claimable = match all_claimables.iter().find(|r| r.utxo.outpoint == outpoint) {
+                Some(claimable) => claimable,
                 None => {
                     return Err(Status::invalid_argument(format!(
                         "outpoint {} not found",
@@ -291,13 +293,13 @@ where
                     )))
                 }
             };
-            redeemables.push(redeemable.clone());
+            claimables.push(claimable.clone());
         }
 
         let current_height = self.chain_client.get_blockheight().await?;
-        let min_blocks_left = match redeemables
+        let min_blocks_left = match claimables
             .iter()
-            .map(|r| r.blocks_left(current_height))
+            .map(|r| r.swap.blocks_left(current_height))
             .min()
         {
             Some(m) => m,
@@ -321,30 +323,30 @@ where
         };
 
         let tx = self
-            .redeem_service
-            .redeem(
-                &redeemables,
+            .claim_service
+            .claim(
+                &claimables,
                 &fee_estimate,
                 current_height,
                 destination_address,
                 request.auto_bump,
             )
             .await?;
-        Ok(Response::new(RedeemReply {
+        Ok(Response::new(ClaimResponse {
             tx_id: tx.compute_txid().to_string(),
             fee_per_kw: fee_estimate.sat_per_kw,
         }))
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn stop(&self, _request: Request<StopRequest>) -> Result<Response<StopReply>, Status> {
+    async fn stop(&self, _request: Request<StopRequest>) -> Result<Response<StopResponse>, Status> {
         self.token.cancel();
-        Ok(Response::new(StopReply {}))
+        Ok(Response::new(StopResponse {}))
     }
 }
 
-impl From<RedeemServiceError> for Status {
-    fn from(value: RedeemServiceError) -> Self {
+impl From<ClaimServiceError> for Status {
+    fn from(value: ClaimServiceError) -> Self {
         Status::internal(value.to_string())
     }
 }
@@ -355,8 +357,8 @@ impl From<WalletError> for Status {
     }
 }
 
-impl From<RedeemError> for Status {
-    fn from(value: RedeemError) -> Self {
+impl From<ClaimError> for Status {
+    fn from(value: ClaimError) -> Self {
         Status::internal(value.to_string())
     }
 }

@@ -4,7 +4,7 @@
 This project contains a swap server. In a nutshell a user requests a swap, pays
 to the swap address and requests payout from the server. The server will then
 pay the user over lightning, obtaining the preimage. Only with that preimage can
-the server redeem the utxo onchain. If the payment is not made, the user can
+the server claim the utxo onchain. If the payment is not made, the user can
 refund the utxo to itself once the locktime has expired.
 
 ## Installation

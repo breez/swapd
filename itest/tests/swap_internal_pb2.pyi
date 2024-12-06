@@ -17,7 +17,7 @@ class AddAddressFiltersRequest(_message.Message):
     addresses: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, addresses: _Optional[_Iterable[str]] = ...) -> None: ...
 
-class AddAddressFiltersReply(_message.Message):
+class AddAddressFiltersResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
@@ -25,7 +25,7 @@ class GetInfoRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
-class GetInfoReply(_message.Message):
+class GetInfoResponse(_message.Message):
     __slots__ = ("block_height", "network")
     BLOCK_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     NETWORK_FIELD_NUMBER: _ClassVar[int]
@@ -50,7 +50,7 @@ class GetSwapRequest(_message.Message):
         payment_hash: _Optional[bytes] = ...,
     ) -> None: ...
 
-class GetSwapReply(_message.Message):
+class GetSwapResponse(_message.Message):
     __slots__ = ("address", "outputs")
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
     OUTPUTS_FIELD_NUMBER: _ClassVar[int]
@@ -72,36 +72,36 @@ class SwapOutput(_message.Message):
         self, outpoint: _Optional[str] = ..., confirmation_height: _Optional[int] = ...
     ) -> None: ...
 
-class ListRedeemableRequest(_message.Message):
+class ListClaimableRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
-class ListRedeemableReply(_message.Message):
-    __slots__ = ("redeemables",)
-    REDEEMABLES_FIELD_NUMBER: _ClassVar[int]
-    redeemables: _containers.RepeatedCompositeFieldContainer[RedeemableUtxo]
+class ListClaimableResponse(_message.Message):
+    __slots__ = ("claimables",)
+    CLAIMABLES_FIELD_NUMBER: _ClassVar[int]
+    claimables: _containers.RepeatedCompositeFieldContainer[ClaimableUtxo]
     def __init__(
-        self, redeemables: _Optional[_Iterable[_Union[RedeemableUtxo, _Mapping]]] = ...
+        self, claimables: _Optional[_Iterable[_Union[ClaimableUtxo, _Mapping]]] = ...
     ) -> None: ...
 
-class RedeemableUtxo(_message.Message):
+class ClaimableUtxo(_message.Message):
     __slots__ = (
         "outpoint",
         "swap_hash",
-        "lock_time",
+        "lock_height",
         "confirmation_height",
         "blocks_left",
         "paid_with_request",
     )
     OUTPOINT_FIELD_NUMBER: _ClassVar[int]
     SWAP_HASH_FIELD_NUMBER: _ClassVar[int]
-    LOCK_TIME_FIELD_NUMBER: _ClassVar[int]
+    LOCK_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     BLOCKS_LEFT_FIELD_NUMBER: _ClassVar[int]
     PAID_WITH_REQUEST_FIELD_NUMBER: _ClassVar[int]
     outpoint: str
     swap_hash: str
-    lock_time: int
+    lock_height: int
     confirmation_height: int
     blocks_left: int
     paid_with_request: str
@@ -109,13 +109,13 @@ class RedeemableUtxo(_message.Message):
         self,
         outpoint: _Optional[str] = ...,
         swap_hash: _Optional[str] = ...,
-        lock_time: _Optional[int] = ...,
+        lock_height: _Optional[int] = ...,
         confirmation_height: _Optional[int] = ...,
         blocks_left: _Optional[int] = ...,
         paid_with_request: _Optional[str] = ...,
     ) -> None: ...
 
-class RedeemRequest(_message.Message):
+class ClaimRequest(_message.Message):
     __slots__ = ("outpoints", "destination_address", "fee_per_kw", "auto_bump")
     OUTPOINTS_FIELD_NUMBER: _ClassVar[int]
     DESTINATION_ADDRESS_FIELD_NUMBER: _ClassVar[int]
@@ -133,7 +133,7 @@ class RedeemRequest(_message.Message):
         auto_bump: bool = ...,
     ) -> None: ...
 
-class RedeemReply(_message.Message):
+class ClaimResponse(_message.Message):
     __slots__ = ("tx_id", "fee_per_kw")
     TX_ID_FIELD_NUMBER: _ClassVar[int]
     FEE_PER_KW_FIELD_NUMBER: _ClassVar[int]
@@ -147,6 +147,6 @@ class StopRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
-class StopReply(_message.Message):
+class StopResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...

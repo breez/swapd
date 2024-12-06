@@ -11,6 +11,7 @@ pub enum LightningError {
 #[derive(Debug)]
 pub struct PaymentRequest {
     pub bolt11: String,
+    pub cltv_limit: u32,
     pub payment_hash: sha256::Hash,
     pub label: String,
     pub fee_limit_msat: u64,

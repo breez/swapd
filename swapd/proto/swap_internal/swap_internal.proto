@@ -2,22 +2,22 @@ syntax = "proto3";
 package swap_internal;
 
 service SwapManager {
-    rpc AddAddressFilters (AddAddressFiltersRequest) returns (AddAddressFiltersReply) {}
-    rpc GetInfo (GetInfoRequest) returns (GetInfoReply) {}
-    rpc GetSwap (GetSwapRequest) returns (GetSwapReply) {}
-    rpc ListRedeemable (ListRedeemableRequest) returns (ListRedeemableReply) {}
-    rpc Redeem(RedeemRequest) returns (RedeemReply) {}
-    rpc Stop (StopRequest) returns (StopReply) {}
+    rpc AddAddressFilters (AddAddressFiltersRequest) returns (AddAddressFiltersResponse) {}
+    rpc GetInfo (GetInfoRequest) returns (GetInfoResponse) {}
+    rpc GetSwap (GetSwapRequest) returns (GetSwapResponse) {}
+    rpc ListClaimable (ListClaimableRequest) returns (ListClaimableResponse) {}
+    rpc Claim(ClaimRequest) returns (ClaimResponse) {}
+    rpc Stop (StopRequest) returns (StopResponse) {}
 }
 
 message AddAddressFiltersRequest {
     repeated string addresses = 1;
 }
 
-message AddAddressFiltersReply {}
+message AddAddressFiltersResponse {}
 
 message GetInfoRequest {}
-message GetInfoReply {
+message GetInfoResponse {
     uint64 block_height = 1;
     string network = 2;
 }
@@ -27,39 +27,41 @@ message GetSwapRequest {
     optional string payment_request = 2;
     optional bytes payment_hash = 3;
 }
-message GetSwapReply {
+message GetSwapResponse {
     string address = 1;
     repeated SwapOutput outputs = 2;
 }
 message SwapOutput {
     string outpoint = 1;
     optional uint64 confirmation_height = 2;
+    optional string block_hash = 3;
 }
 
-message ListRedeemableRequest {}
-message ListRedeemableReply {
-    repeated RedeemableUtxo redeemables = 1;
+message ListClaimableRequest {}
+message ListClaimableResponse {
+    repeated ClaimableUtxo claimables = 1;
 }
 
-message RedeemableUtxo {
+message ClaimableUtxo {
     string outpoint = 1;
     string swap_hash = 2;
-    uint32 lock_time = 3;
+    uint32 lock_height = 3;
     uint64 confirmation_height = 4;
-    int32 blocks_left = 5;
-    optional string paid_with_request = 6;
+    string block_hash = 5;
+    int32 blocks_left = 6;
+    optional string paid_with_request = 7;
 }
 
-message RedeemRequest {
+message ClaimRequest {
     repeated string outpoints = 1;
     optional string destination_address = 2;
     optional uint32 fee_per_kw = 3;
     bool auto_bump = 4;
 }
-message RedeemReply {
+message ClaimResponse {
     string tx_id = 1;
     uint32 fee_per_kw = 2;
 }
 
 message StopRequest {}
-message StopReply {}
+message StopResponse {}

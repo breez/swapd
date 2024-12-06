@@ -2,8 +2,8 @@ from helpers import *
 from decimal import Decimal
 
 
-def test_redeem_rbf_close_to_deadline(node_factory, swapd_factory):
-    # slow down the redeem poll interval, so the replacement transaction is not
+def test_claim_rbf_close_to_deadline(node_factory, swapd_factory):
+    # slow down the claim poll interval, so the replacement transaction is not
     # mined during the creation of new blocks.
     interval = "4"
     if SLOW_MACHINE:
@@ -13,30 +13,28 @@ def test_redeem_rbf_close_to_deadline(node_factory, swapd_factory):
         node_factory,
         swapd_factory,
         {
-            "redeem-poll-interval-seconds": interval,
+            "claim-poll-interval-seconds": interval,
         },
     )
     expected_outputs = len(swapper.lightning_node.list_utxos()) + 1
-    address, payment_request, h = add_fund_init(user, swapper)
+    address, payment_request, h = create_swap(user, swapper)
     txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
     wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
 
-    swapper.rpc.get_swap_payment(payment_request)
+    swapper.rpc.pay_swap(payment_request)
     wait_for(lambda: user.list_invoices(payment_hash=h)[0]["paid"])
 
     wait_for(lambda: swapper.lightning_node.bitcoin.rpc.getmempoolinfo()["size"] == 1)
-    redeem_txid1 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
-    redeem_raw1 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
-        redeem_txid1, True
-    )
-    assert redeem_raw1["vin"][0]["txid"] == txid
-    assert redeem_raw1["vout"][0]["value"] == Decimal("0.00099755")
+    claim_txid1 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
+    claim_raw1 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid1, True)
+    assert claim_raw1["vin"][0]["txid"] == txid
+    assert claim_raw1["vout"][0]["value"] == Decimal("0.00099755")
 
     # Set the effective fee rate of the mempool tx to 0, so it won't be mined
     swapper.lightning_node.bitcoin.rpc.prioritisetransaction(
-        redeem_txid1, None, -1000000
+        claim_txid1, None, -1000000
     )
     swapper.lightning_node.bitcoin.generate_block(288)
 
@@ -45,15 +43,13 @@ def test_redeem_rbf_close_to_deadline(node_factory, swapd_factory):
         if len(memp) == 0:
             return False
         assert len(memp) == 1
-        return memp[0] != redeem_txid1
+        return memp[0] != claim_txid1
 
     wait_for(check_bumped)
-    redeem_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
-    redeem_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
-        redeem_txid2, True
-    )
-    assert redeem_raw2["vin"][0]["txid"] == txid
-    assert redeem_raw2["vout"][0]["value"] == Decimal("0.00099635")
+    claim_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
+    claim_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid2, True)
+    assert claim_raw2["vin"][0]["txid"] == txid
+    assert claim_raw2["vout"][0]["value"] == Decimal("0.00099635")
 
     swapper.lightning_node.bitcoin.generate_block(1)
 
@@ -64,28 +60,26 @@ def test_redeem_rbf_close_to_deadline(node_factory, swapd_factory):
     wait_for(wait_outputs)
 
 
-def test_redeem_rbf_new_feerate(node_factory, swapd_factory):
+def test_claim_rbf_new_feerate(node_factory, swapd_factory):
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
     expected_outputs = len(swapper.lightning_node.list_utxos()) + 1
-    address, payment_request, h = add_fund_init(user, swapper)
+    address, payment_request, h = create_swap(user, swapper)
     txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
     wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
 
-    swapper.rpc.get_swap_payment(payment_request)
+    swapper.rpc.pay_swap(payment_request)
     wait_for(lambda: user.list_invoices(payment_hash=h)[0]["paid"])
 
     wait_for(lambda: swapper.lightning_node.bitcoin.rpc.getmempoolinfo()["size"] == 1)
-    redeem_txid1 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
-    redeem_raw1 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
-        redeem_txid1, True
-    )
-    assert redeem_raw1["vin"][0]["txid"] == txid
-    assert redeem_raw1["vout"][0]["value"] == Decimal("0.00099755")
+    claim_txid1 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
+    claim_raw1 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid1, True)
+    assert claim_raw1["vin"][0]["txid"] == txid
+    assert claim_raw1["vout"][0]["value"] == Decimal("0.00099755")
     # Set the effective fee rate of the mempool tx to 0, so it won't be mined
     swapper.lightning_node.bitcoin.rpc.prioritisetransaction(
-        redeem_txid1, None, -1000000
+        claim_txid1, None, -1000000
     )
 
     # increase the current feerates by 5x (it's an exponent, so won't be 5x)
@@ -96,22 +90,20 @@ def test_redeem_rbf_new_feerate(node_factory, swapd_factory):
         if len(memp) == 0:
             return False
         assert len(memp) == 1
-        redeem_txid2 = memp[0]
-        if redeem_txid2 == redeem_txid1:
+        claim_txid2 = memp[0]
+        if claim_txid2 == claim_txid1:
             return False
 
-        redeem_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
-            redeem_txid2, True
+        claim_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
+            claim_txid2, True
         )
-        return redeem_raw2["vout"][0]["value"] != redeem_raw1["vout"][0]["value"]
+        return claim_raw2["vout"][0]["value"] != claim_raw1["vout"][0]["value"]
 
     wait_for(check_bumped)
-    redeem_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
-    redeem_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
-        redeem_txid2, True
-    )
-    assert redeem_raw2["vin"][0]["txid"] == txid
-    assert redeem_raw2["vout"][0]["value"] == Decimal("0.00097303")
+    claim_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
+    claim_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid2, True)
+    assert claim_raw2["vin"][0]["txid"] == txid
+    assert claim_raw2["vout"][0]["value"] == Decimal("0.00097303")
 
     swapper.lightning_node.bitcoin.generate_block(1)
     wait_for(lambda: len(swapper.lightning_node.list_utxos()) == expected_outputs)

@@ -200,6 +200,7 @@ where
                 payment_request: request.bolt11,
                 fee_limit_msat: request.fee_limit_msat as i64,
                 timeout_seconds: request.timeout_seconds as i32,
+                cltv_limit: request.cltv_limit as i32,
                 ..Default::default()
             })
             .await

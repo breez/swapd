@@ -242,7 +242,7 @@ where
                 };
                 addresses.push(address.clone());
                 let entry = address_utxos.entry(address).or_insert(Vec::new());
-                entry.push((OutPoint::new(txid, vout as u32), output.value));
+                entry.push((OutPoint::new(txid, vout as u32), output.clone()));
             }
 
             for (vin, input) in tx.input.iter().enumerate() {
@@ -263,13 +263,13 @@ where
             .filter_map(|a| {
                 address_utxos.get(&a).map(|out| {
                     out.iter()
-                        .map(|(outpoint, amount_sat)| AddressUtxo {
+                        .map(|(outpoint, tx_out)| AddressUtxo {
                             address: a.clone(),
                             utxo: Utxo {
-                                amount_sat: amount_sat.to_sat(),
                                 block_hash,
                                 block_height,
                                 outpoint: *outpoint,
+                                tx_out: tx_out.clone(),
                             },
                         })
                         .collect()
