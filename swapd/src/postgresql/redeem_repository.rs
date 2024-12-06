@@ -29,7 +29,7 @@ impl RedeemRepository {
 impl redeem::RedeemRepository for RedeemRepository {
     #[instrument(level = "trace", skip(self))]
     async fn add_redeem(&self, redeem: &Redeem) -> Result<(), RedeemRepositoryError> {
-        let tx_id = redeem.tx.txid().to_string();
+        let tx_id = redeem.tx.compute_txid().to_string();
         let mut tx: Vec<u8> = Vec::new();
         redeem.tx.consensus_encode(&mut tx)?;
         let mut db_tx = self.pool.begin().await?;
@@ -129,14 +129,14 @@ impl redeem::RedeemRepository for RedeemRepository {
     }
 }
 
-impl From<bitcoin::address::Error> for RedeemRepositoryError {
-    fn from(value: bitcoin::address::Error) -> Self {
+impl From<bitcoin::address::ParseError> for RedeemRepositoryError {
+    fn from(value: bitcoin::address::ParseError) -> Self {
         RedeemRepositoryError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for RedeemRepositoryError {
-    fn from(value: bitcoin::hashes::hex::Error) -> Self {
+impl From<bitcoin::hashes::hex::HexToArrayError> for RedeemRepositoryError {
+    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
         RedeemRepositoryError::General(Box::new(value))
     }
 }
@@ -155,6 +155,12 @@ impl From<std::io::Error> for RedeemRepositoryError {
 
 impl From<std::time::SystemTimeError> for RedeemRepositoryError {
     fn from(value: std::time::SystemTimeError) -> Self {
+        RedeemRepositoryError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::io::Error> for RedeemRepositoryError {
+    fn from(value: bitcoin::io::Error) -> Self {
         RedeemRepositoryError::General(Box::new(value))
     }
 }

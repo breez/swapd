@@ -331,7 +331,7 @@ where
             )
             .await?;
         Ok(Response::new(RedeemReply {
-            tx_id: tx.txid().to_string(),
+            tx_id: tx.compute_txid().to_string(),
             fee_per_kw: fee_estimate.sat_per_kw,
         }))
     }

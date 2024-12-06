@@ -386,20 +386,8 @@ impl From<SystemTimeError> for SwapPersistenceError {
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for GetSwapsError {
-    fn from(value: bitcoin::hashes::hex::Error) -> Self {
-        GetSwapsError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::address::Error> for GetSwapsError {
-    fn from(value: bitcoin::address::Error) -> Self {
-        GetSwapsError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::key::Error> for GetSwapsError {
-    fn from(value: bitcoin::key::Error) -> Self {
+impl From<bitcoin::address::ParseError> for GetSwapsError {
+    fn from(value: bitcoin::address::ParseError) -> Self {
         GetSwapsError::General(Box::new(value))
     }
 }
@@ -410,8 +398,26 @@ impl From<sqlx::Error> for GetSwapsError {
     }
 }
 
-impl From<bitcoin::hashes::Error> for GetSwapsError {
-    fn from(value: bitcoin::hashes::Error) -> Self {
+impl From<bitcoin::hashes::hex::HexToArrayError> for GetSwapsError {
+    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
+        GetSwapsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::FromSliceError> for GetSwapsError {
+    fn from(value: bitcoin::hashes::FromSliceError) -> Self {
+        GetSwapsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::key::FromSliceError> for GetSwapsError {
+    fn from(value: bitcoin::key::FromSliceError) -> Self {
+        GetSwapsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::secp256k1::Error> for GetSwapsError {
+    fn from(value: bitcoin::secp256k1::Error) -> Self {
         GetSwapsError::General(Box::new(value))
     }
 }
@@ -428,8 +434,8 @@ impl From<sqlx::Error> for GetPaidUtxosError {
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for GetPaidUtxosError {
-    fn from(value: bitcoin::hashes::hex::Error) -> Self {
+impl From<bitcoin::hashes::hex::HexToArrayError> for GetPaidUtxosError {
+    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
         GetPaidUtxosError::General(Box::new(value))
     }
 }

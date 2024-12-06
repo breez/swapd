@@ -234,7 +234,7 @@ where
         let mut addresses = Vec::new();
         let mut address_utxos = HashMap::new();
         for tx in &block.txdata {
-            let txid = tx.txid();
+            let txid = tx.compute_txid();
             for (vout, output) in tx.output.iter().enumerate() {
                 let address = match Address::from_script(&output.script_pubkey, self.network) {
                     Ok(address) => address,
@@ -266,7 +266,7 @@ where
                         .map(|(outpoint, amount_sat)| AddressUtxo {
                             address: a.clone(),
                             utxo: Utxo {
-                                amount_sat: *amount_sat,
+                                amount_sat: amount_sat.to_sat(),
                                 block_hash,
                                 block_height,
                                 outpoint: *outpoint,

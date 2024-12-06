@@ -300,14 +300,20 @@ impl From<serde_json::error::Error> for CallError {
     }
 }
 
-impl From<bitcoin::address::Error> for ChainError {
-    fn from(value: bitcoin::address::Error) -> Self {
+impl From<bitcoin::address::FromScriptError> for ChainError {
+    fn from(value: bitcoin::address::FromScriptError) -> Self {
         ChainError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for ChainError {
-    fn from(value: bitcoin::hashes::hex::Error) -> Self {
+impl From<bitcoin::hashes::hex::HexToArrayError> for ChainError {
+    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
+        ChainError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::hex::HexToBytesError> for ChainError {
+    fn from(value: bitcoin::hashes::hex::HexToBytesError) -> Self {
         ChainError::General(Box::new(value))
     }
 }

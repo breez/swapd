@@ -6,7 +6,7 @@ pub enum WalletError {
     #[error("creation failed")]
     CreationFailed,
     #[error("invalid address: {0}")]
-    InvalidAddress(bitcoin::address::Error),
+    InvalidAddress(bitcoin::address::ParseError),
     #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }

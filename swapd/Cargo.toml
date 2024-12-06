@@ -4,26 +4,26 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1.81"
-bitcoin = "0.30.2"
+async-trait = "0.1.83"
+bitcoin = "0.32.5"
 clap = { workspace = true, features = ["derive"] }
-futures = "0.3.30"
-futures-util = "0.3.30"
+futures = "0.3.31"
+futures-util = "0.3.31"
 hex = { workspace = true }
-lightning-invoice = "0.31.0"
+lightning-invoice = "0.32.0"
 prost = { workspace = true }
-regex = "1.10.6"
-reqwest = { version = "0.12.5", features = ["json"] }
+regex = "1.11.1"
+reqwest = { version = "0.12.9", features = ["json"] }
 ring = "0.17.8"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sqlx = { version = "0.8.0", features = ["postgres", "runtime-tokio", "tls-native-tls"] }
-thiserror = "1.0.63"
+sqlx = { version = "0.8.2", features = ["postgres", "runtime-tokio", "tls-native-tls"] }
+thiserror = "2.0.4"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
-tokio-util = { version = "0.7.11", features = ["rt"] }
+tokio-util = { version = "0.7.13", features = ["rt"] }
 tonic = { workspace = true, features = ["tls"] }
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }
