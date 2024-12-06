@@ -123,7 +123,7 @@ where
         debug!(
             fee_per_kw = fee_estimate.sat_per_kw,
             outpoints = field::debug(outpoints),
-            tx_id = field::display(tx.txid()),
+            tx_id = field::display(tx.compute_txid()),
             "broadcasting redeem tx"
         );
         self.chain_client.broadcast_tx(tx.clone()).await?;

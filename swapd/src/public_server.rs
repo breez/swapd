@@ -1,6 +1,6 @@
 use bitcoin::{
     hashes::{sha256::Hash, Hash as _},
-    Address, Network, PublicKey,
+    Address, CompressedPublicKey, Network, PublicKey,
 };
 use lightning_invoice::Bolt11Invoice;
 use std::sync::Arc;
@@ -370,16 +370,12 @@ where
         // is redeemable within reasonable time.
         let fee_estimate = self.fee_estimator.estimate_fee(6).await?;
         let fake_address = Address::p2wpkh(
-            &PublicKey::from_slice(&[0x02; 33]).map_err(|e| {
+            &CompressedPublicKey::from_slice(&[0x02; 33]).map_err(|e| {
                 error!("failed to create fake pubkey: {:?}", e);
                 Status::internal("internal error")
             })?,
             self.network,
-        )
-        .map_err(|e| {
-            error!("failed to create fake address: {:?}", e);
-            Status::internal("internal error")
-        })?;
+        );
 
         // If the redeem tx can be created, this is a valid swap.
         self.swap_service

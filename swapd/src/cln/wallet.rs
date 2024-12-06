@@ -45,8 +45,8 @@ impl From<tonic::Status> for WalletError {
     }
 }
 
-impl From<bitcoin::address::Error> for WalletError {
-    fn from(value: bitcoin::address::Error) -> Self {
+impl From<bitcoin::address::ParseError> for WalletError {
+    fn from(value: bitcoin::address::ParseError) -> Self {
         WalletError::InvalidAddress(value)
     }
 }

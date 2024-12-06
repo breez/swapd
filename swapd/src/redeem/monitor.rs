@@ -216,7 +216,7 @@ where
                     .join(",");
                 match redeem {
                     Some(redeem) => error!(
-                        tx_id = field::display(redeem.tx.txid()),
+                        tx_id = field::display(redeem.tx.compute_txid()),
                         outpoints = redeemables,
                         "failed to recheck redeem: {:?}",
                         e
@@ -246,11 +246,12 @@ where
         };
         let fee_estimate = self.fee_estimator.estimate_fee(blocks_left).await?;
 
+        let redeem_txid = redeem.tx.compute_txid();
         // If the feerate is still sufficient, rebroadcast the same transaction.
         if redeem.fee_per_kw + MIN_REPLACEMENT_DIFF_SAT_PER_KW > fee_estimate.sat_per_kw {
             return match self.chain_client.broadcast_tx(redeem.tx.clone()).await {
                 Ok(_) => {
-                    debug!("succesfully rebroadcast redeem tx '{}'", redeem.tx.txid());
+                    debug!("succesfully rebroadcast redeem tx '{}'", redeem_txid);
                     Ok(())
                 }
                 Err(e) => match e {
@@ -258,8 +259,7 @@ where
                     BroadcastError::InsufficientFeeRejectingReplacement(_) => {
                         debug!(
                             "rebroadcast redeem tx '{}' returned expected error '{}'",
-                            redeem.tx.txid(),
-                            e
+                            redeem_txid, e
                         );
                         Ok(())
                     }
@@ -280,8 +280,8 @@ where
             )
             .await?;
         debug!(
-            tx_id = field::display(replacement.txid()),
-            prev_tx_id = field::display(redeem.tx.txid()),
+            tx_id = field::display(replacement.compute_txid()),
+            prev_tx_id = field::display(redeem_txid),
             "broadcasted replacement redeem tx"
         );
         Ok(())
@@ -318,12 +318,6 @@ where
             )
             .await?;
         Ok(())
-    }
-}
-
-impl From<bitcoin::address::Error> for RedeemError {
-    fn from(value: bitcoin::address::Error) -> Self {
-        RedeemError::General(Box::new(value))
     }
 }
 
