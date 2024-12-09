@@ -331,6 +331,9 @@ class SwapdFactory(object):
         postgres_factory,
         node_factory,
         options_provider,
+        lock_time,
+        min_claim_blocks,
+        min_viable_cltv,
     ):
 
         self.testname = testname
@@ -344,6 +347,9 @@ class SwapdFactory(object):
         self.postgres_factory = postgres_factory
         self.node_factory = node_factory
         self.options_provider = options_provider
+        self.lock_time = lock_time
+        self.min_claim_blocks = min_claim_blocks
+        self.min_viable_cltv = min_viable_cltv
 
     def get_swapd_id(self):
         """Generate a unique numeric ID for a swapd instance"""
@@ -367,8 +373,20 @@ class SwapdFactory(object):
         postgres = self.postgres_factory.get_container()
         node = self.node_factory.get_node()
         node_options = self.options_provider.get_options(node)
+
+        base_options = {
+            "lock-time": self.lock_time,
+            "min-claim-blocks": self.min_claim_blocks,
+            "min-viable-cltv": self.min_viable_cltv,
+        }
+
         if options is None:
-            options = {}
+            options = base_options
+        else:
+            for k, v in options.items():
+                base_options[k] = v
+            options = base_options
+
         for k, v in node_options.items():
             options[k] = v
 

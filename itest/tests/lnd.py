@@ -255,8 +255,10 @@ class LndNode(object):
 
         return {"txid": res["txid"], "outnum": res["outnum"]}
 
-    def create_invoice(self, amount_msat, description="desc", preimage=None):
-        inv = self.rpc.add_invoice(amount_msat, description, preimage=preimage)
+    def create_invoice(self, amount_msat, description="desc", preimage=None, cltv=None):
+        inv = self.rpc.add_invoice(
+            amount_msat, description, preimage=preimage, cltv=cltv
+        )
         return inv["payment_request"]
 
     def send_onchain(self, address, amount, confirm=0):
@@ -357,6 +359,19 @@ class LndGrpc(object):
             self.stub = LightningStub(self.interceptor)
             self.wallet_stub = WalletKitStub(self.interceptor)
 
+    def add_invoice(self, amount_msat, description, preimage=None, cltv=None):
+        r_preimage = None
+        if preimage is not None:
+            r_preimage = bytes.fromhex(preimage)
+        payload = lightning_pb2.Invoice(
+            value_msat=amount_msat,
+            memo=description,
+            r_preimage=r_preimage,
+            cltv_expiry=cltv,
+        )
+        resp = self.stub.AddInvoice(payload)
+        return {"payment_request": resp.payment_request}
+
     def gen_seed(self):
         payload = walletunlocker_pb2.GenSeedRequest()
         resp = self.unlocker_stub.GenSeed(payload)
@@ -455,13 +470,14 @@ class LndGrpc(object):
 class LndNodeFactory(object):
     """A factory to setup and start `lnd` daemons."""
 
-    def __init__(self, bitcoind, directory):
+    def __init__(self, bitcoind, directory, cltv_delta):
         self.next_id = 1
         self.nodes = []
         self.reserved_ports = []
         self.bitcoind = bitcoind
         self.directory = directory
         self.lock = threading.Lock()
+        self.cltv_delta = cltv_delta
 
     def get_node_id(self):
         """Generate a unique numeric ID for a lightning node"""
@@ -471,7 +487,11 @@ class LndNodeFactory(object):
             return node_id
 
     def get_node(
-        self, node_id=None, start=True, cleandir=True, wait_for_bitcoind_sync=True
+        self,
+        node_id=None,
+        start=True,
+        cleandir=True,
+        wait_for_bitcoind_sync=True,
     ):
         node_id = self.get_node_id() if not node_id else node_id
         port = reserve_unused_port()
@@ -482,7 +502,15 @@ class LndNodeFactory(object):
         if cleandir and os.path.exists(lnd_dir):
             shutil.rmtree(lnd_dir)
 
-        node = LndNode(node_id, lnd_dir, self.bitcoind, port=port, grpc_port=grpc_port)
+        options = {"bitcoin.timelockdelta": self.cltv_delta}
+        node = LndNode(
+            node_id,
+            lnd_dir,
+            self.bitcoind,
+            port=port,
+            grpc_port=grpc_port,
+            options=options,
+        )
 
         self.nodes.append(node)
         self.reserved_ports.append(port)

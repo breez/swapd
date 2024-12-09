@@ -2,7 +2,7 @@ from helpers import *
 from decimal import Decimal
 
 
-def test_claim_rbf_close_to_deadline(node_factory, swapd_factory):
+def test_claim_rbf_close_to_deadline(node_factory, swapd_factory, lock_time):
     # slow down the claim poll interval, so the replacement transaction is not
     # mined during the creation of new blocks.
     interval = "4"
@@ -36,7 +36,7 @@ def test_claim_rbf_close_to_deadline(node_factory, swapd_factory):
     swapper.lightning_node.bitcoin.rpc.prioritisetransaction(
         claim_txid1, None, -1000000
     )
-    swapper.lightning_node.bitcoin.generate_block(288)
+    swapper.lightning_node.bitcoin.generate_block(lock_time - 1)
 
     def check_bumped():
         memp = swapper.lightning_node.bitcoin.rpc.getrawmempool()

@@ -69,6 +69,27 @@ def whatthefee():
     wtf.stop()
 
 
+@pytest.fixture
+def lock_time():
+    return 1008
+
+
+@pytest.fixture
+def min_claim_blocks():
+    return 72
+
+
+@pytest.fixture
+def min_viable_cltv():
+    return 40
+
+
+# NOTE: cltv_delta should be higher than min_viable_cltv for the cltv tests to work
+@pytest.fixture
+def cltv_delta():
+    return 80
+
+
 def get_crash_log(swapd):
     if swapd.may_fail:
         return None, None
@@ -123,15 +144,15 @@ def postgres_factory(test_name, teardown_checks):
 
 
 @pytest.fixture
-def cln_factory(directory, bitcoind):
-    nf = ClnNodeFactory(bitcoind, directory)
+def cln_factory(directory, bitcoind, cltv_delta):
+    nf = ClnNodeFactory(bitcoind, directory, cltv_delta)
     yield nf
     nf.killall()
 
 
 @pytest.fixture
-def lnd_factory(directory, bitcoind):
-    nf = LndNodeFactory(bitcoind, directory)
+def lnd_factory(directory, bitcoind, cltv_delta):
+    nf = LndNodeFactory(bitcoind, directory, cltv_delta)
     yield nf
     nf.killall()
 
@@ -171,6 +192,9 @@ def swapd_factory(
     cln_options,
     lnd_factory,
     lnd_options,
+    lock_time,
+    min_claim_blocks,
+    min_viable_cltv,
 ):
     node_factory = cln_factory
     options_provider = cln_options
@@ -186,6 +210,9 @@ def swapd_factory(
         node_factory=node_factory,
         options_provider=options_provider,
         postgres_factory=postgres_factory,
+        lock_time=lock_time,
+        min_claim_blocks=min_claim_blocks,
+        min_viable_cltv=min_viable_cltv,
     )
 
     yield sf
