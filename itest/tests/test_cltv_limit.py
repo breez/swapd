@@ -92,7 +92,7 @@ def test_on_cltv_limit_with_router(
         100_000_000,
         description="test",
         preimage=preimage,
-        cltv=lock_time - 1 - min_claim_blocks - cltv_delta - 2,
+        cltv=lock_time - 1 - min_claim_blocks - cltv_delta - 3,
     )
 
     swapper.rpc.pay_swap(payment_request)

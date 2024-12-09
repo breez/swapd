@@ -71,23 +71,23 @@ def whatthefee():
 
 @pytest.fixture
 def lock_time():
-    return 1008
+    return 50
 
 
 @pytest.fixture
 def min_claim_blocks():
-    return 72
+    return 5
 
 
 @pytest.fixture
 def min_viable_cltv():
-    return 40
+    return 8
 
 
 # NOTE: cltv_delta should be higher than min_viable_cltv for the cltv tests to work
 @pytest.fixture
 def cltv_delta():
-    return 80
+    return 18
 
 
 def get_crash_log(swapd):
