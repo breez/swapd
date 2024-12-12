@@ -7,7 +7,9 @@ use tracing::{debug, field};
 use crate::{
     chain::{ChainClient, ChainRepository, ChainRepositoryError, FeeEstimate},
     claim::Claim,
-    swap::{ClaimableUtxo, GetSwapsError, PrivateKeyProvider, SwapRepository, SwapService},
+    swap::{
+        ClaimableUtxo, GetSwapsError, PrivateKeyProvider, SwapError, SwapRepository, SwapService,
+    },
 };
 
 use super::ClaimRepository;
@@ -140,6 +142,12 @@ where
             .add_watch_address(&destination_address)
             .await?;
         Ok(tx)
+    }
+}
+
+impl From<SwapError> for ClaimError {
+    fn from(value: SwapError) -> Self {
+        ClaimError::General(Box::new(value))
     }
 }
 

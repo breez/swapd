@@ -17,7 +17,7 @@ use crate::{
         ChainClient, ChainError, ChainRepository, ChainRepositoryError, FeeEstimateError,
         FeeEstimator,
     },
-    swap::{CreateClaimTxError, GetSwapsError, PrivateKeyProvider, SwapRepository},
+    swap::{GetSwapsError, PrivateKeyProvider, SwapRepository},
     wallet::{Wallet, WalletError},
 };
 
@@ -344,12 +344,6 @@ impl From<ChainError> for ClaimError {
 
 impl From<BroadcastError> for ClaimError {
     fn from(value: BroadcastError) -> Self {
-        ClaimError::General(Box::new(value))
-    }
-}
-
-impl From<CreateClaimTxError> for ClaimError {
-    fn from(value: CreateClaimTxError) -> Self {
         ClaimError::General(Box::new(value))
     }
 }

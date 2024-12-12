@@ -11,11 +11,11 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 hex = { workspace = true }
 lightning-invoice = "0.32.0"
-musig2 = "0.2.1"
 prost = { workspace = true }
 regex = "1.11.1"
 reqwest = { version = "0.12.9", features = ["json"] }
 ring = "0.17.8"
+secp256k1 = { git = "https://github.com/rust-bitcoin/rust-secp256k1", rev = "c6013c54aafbf51e1a3468bd232357e9811d0532"}
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sqlx = { version = "0.8.2", features = ["postgres", "runtime-tokio", "tls-native-tls"] }

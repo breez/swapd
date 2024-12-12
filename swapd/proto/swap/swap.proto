@@ -25,12 +25,13 @@ message PaySwapRequest {
 message PaySwapResponse {}
 
 message RefundSwapRequest {
-    bytes nonce = 1;
+    string address = 1;
     bytes transaction = 2;
     uint32 input_index = 3;
+    bytes pub_nonce = 4;
 }
 
 message RefundSwapResponse {
-    bytes nonce = 1;
+    bytes pub_nonce = 1;
     bytes partial_signature = 2;
 }

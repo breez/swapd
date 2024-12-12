@@ -1,21 +1,24 @@
 use std::time::SystemTime;
 
-use super::privkey_provider::PrivateKeyProvider;
+use super::privkey_provider::{PrivateKeyError, PrivateKeyProvider};
 use crate::chain::{FeeEstimate, Utxo};
 use bitcoin::{
     absolute::LockTime,
     hashes::{ripemd160, sha256, Hash},
-    key::Secp256k1,
     opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CLTV, OP_EQUALVERIFY, OP_HASH160},
-    secp256k1::{All, Message, PublicKey, SecretKey},
-    sighash::{self, Prevouts},
+    secp256k1::{All, Message, PublicKey, Secp256k1, SecretKey},
+    sighash::{self, Prevouts, SighashCache},
     taproot::{LeafVersion, Signature, TaprootBuilder, TaprootSpendInfo},
     transaction::Version,
     Address, Amount, CompressedPublicKey, Network, Script, ScriptBuf, Sequence, TapLeafHash,
-    TapSighashType, Transaction, TxIn, TxOut, Weight, Witness,
+    TapSighashType, Transaction, TxIn, TxOut, Weight, Witness, XOnlyPublicKey,
+};
+use secp256k1::musig::{
+    MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSession,
+    MusigSessionId,
 };
 use thiserror::Error;
-use tracing::{error, field, instrument, trace};
+use tracing::{error, instrument, trace};
 
 // TODO: fix for taproot
 const CLAIM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
@@ -77,34 +80,28 @@ impl std::fmt::Debug for SwapPrivateData {
     }
 }
 
-#[derive(Debug)]
-pub enum CreateSwapError {
-    PrivateKeyError,
-    InvalidBlockHeight,
-    InvalidTransaction,
-    Taproot(TaprootError),
-}
-
 #[derive(Debug, Error)]
-pub enum CreateClaimTxError {
-    #[error("invalid block height")]
-    InvalidBlockHeight,
+pub enum SwapError {
+    #[error("private key: {0}")]
+    PrivateKey(PrivateKeyError),
+    #[error("invalid block height: {0}")]
+    InvalidBlockHeight(bitcoin::locktime::absolute::ConversionError),
+    #[error("fake address error")]
+    FakeAddress,
+    #[error("taproot: {0}")]
+    Taproot(TaprootError),
     #[error("invalid weight")]
     InvalidWeight,
-    #[error("invalid signing data")]
-    InvalidSigningData,
-    #[error("invalid message")]
-    InvalidMessage,
-    #[error("invalid secret key")]
-    InvalidSecretKey,
-    #[error("invalid signature")]
-    InvalidSignature,
-    #[error("not enough memory")]
-    NotEnoughMemory,
     #[error("amount too low")]
     AmountTooLow,
-    #[error("taproot error: {0}")]
-    Taproot(TaprootError),
+    #[error("conversion error")]
+    Conversion,
+    #[error("musig tweak: {0}")]
+    MusigTweak(secp256k1::musig::MusigTweakErr),
+    #[error("nonce gen: {0}")]
+    NonceGen(secp256k1::musig::MusigNonceGenError),
+    #[error("sign: {0}")]
+    Sign(secp256k1::musig::MusigSignError),
 }
 
 #[derive(Debug)]
@@ -115,6 +112,8 @@ where
     dust_limit_sat: u64,
     network: Network,
     secp: Secp256k1<All>,
+    // NOTE: Remove once the bitcoin crate contains the musig module.
+    musig_secp: secp256k1::Secp256k1<secp256k1::All>,
     privkey_provider: P,
     lock_time: u32,
 }
@@ -133,6 +132,7 @@ where
             dust_limit_sat,
             network: network.into(),
             secp: Secp256k1::new(),
+            musig_secp: secp256k1::Secp256k1::new(),
             privkey_provider,
             lock_time,
         }
@@ -144,12 +144,9 @@ where
         refund_pubkey: PublicKey,
         hash: sha256::Hash,
         current_height: u64,
-    ) -> Result<Swap, CreateSwapError> {
+    ) -> Result<Swap, SwapError> {
         let creation_time = SystemTime::now();
-        let claim_privkey = self.privkey_provider.new_private_key().map_err(|e| {
-            error!("error creating private key: {:?}", e);
-            CreateSwapError::PrivateKeyError
-        })?;
+        let claim_privkey = self.privkey_provider.new_private_key()?;
         let claim_pubkey = claim_privkey.public_key(&self.secp);
         let (x_only_claim_pubkey, _) = claim_pubkey.x_only_public_key();
         let (x_only_refund_pubkey, _) = refund_pubkey.x_only_public_key();
@@ -173,7 +170,7 @@ where
         let fake_address = Address::p2wpkh(
             &CompressedPublicKey::from_slice(&[0x02; 33]).map_err(|e| {
                 error!("failed to create fake pubkey: {:?}", e);
-                CreateSwapError::PrivateKeyError
+                SwapError::FakeAddress
             })?,
             self.network,
         );
@@ -204,7 +201,7 @@ where
         fee: &FeeEstimate,
         current_height: u64,
         destination_address: Address,
-    ) -> Result<Transaction, CreateClaimTxError> {
+    ) -> Result<Transaction, SwapError> {
         // Sort by outpoint to reproducibly craft the same tx.
         let mut claimables = claimables.to_vec();
         claimables.sort_by(|a, b| a.utxo.outpoint.cmp(&b.utxo.outpoint));
@@ -234,7 +231,7 @@ where
             .checked_add(Weight::from_wu(
                 (CLAIM_INPUT_WITNESS_SIZE * tx.input.len()) as u64,
             ))
-            .ok_or(CreateClaimTxError::InvalidWeight)?;
+            .ok_or(SwapError::InvalidWeight)?;
         let fee_msat = weight.to_wu() * fee.sat_per_kw as u64;
         let fee_sat = (fee_msat + 999) / 1000;
         let value_after_fees_sat = total_value.saturating_sub(fee_sat);
@@ -245,7 +242,7 @@ where
                 value_after_fees_sat,
                 dust_limit_sat = self.dust_limit_sat
             );
-            return Err(CreateClaimTxError::AmountTooLow);
+            return Err(SwapError::AmountTooLow);
         }
         tx.output[0].value = Amount::from_sat(value_after_fees_sat);
 
@@ -256,18 +253,11 @@ where
                 TapLeafHash::from_script(&c.swap.public.claim_script, LeafVersion::TapScript);
 
             let mut sighasher = sighash::SighashCache::new(&tx);
-            let sighash = sighasher.taproot_script_spend_signature_hash(
-                n,
-                &prevouts,
-                leaf_hash,
-                TapSighashType::All,
-            )?;
+            let sighash = sighasher
+                .taproot_script_spend_signature_hash(n, &prevouts, leaf_hash, TapSighashType::All)
+                .map_err(TaprootError::TaprootSighash)?;
 
-            let rnd = self
-                .privkey_provider
-                .new_private_key()
-                .map_err(|_| CreateClaimTxError::InvalidSecretKey)?
-                .secret_bytes();
+            let rnd = self.privkey_provider.new_private_key()?.secret_bytes();
             let msg = Message::from(sighash);
             let signature = self.secp.sign_schnorr_with_aux_rand(
                 &msg,
@@ -281,7 +271,7 @@ where
             let control_block = self
                 .taproot_spend_info(&c.swap)?
                 .control_block(&(c.swap.public.claim_script.clone(), LeafVersion::TapScript))
-                .ok_or(CreateClaimTxError::InvalidSigningData)?;
+                .ok_or(TaprootError::MissingControlBlock)?;
             let witness = vec![
                 signature.to_vec(),
                 c.preimage.to_vec(),
@@ -294,18 +284,69 @@ where
         Ok(tx)
     }
 
+    pub fn partial_sign_refund_tx(
+        &self,
+        swap: &Swap,
+        tx: Transaction,
+        prevouts: Vec<TxOut>,
+        input_index: usize,
+        their_pub_nonce: MusigPubNonce,
+    ) -> Result<(MusigPartialSignature, MusigPubNonce), SwapError> {
+        let tweak = self.taproot_spend_info(swap)?.tap_tweak();
+        let tweak_scalar = tweak.to_scalar();
+
+        // TODO: Remove conversion once bitcoin crate contains musig module.
+        let tweak_scalar = secp256k1::Scalar::from_be_bytes(tweak_scalar.to_be_bytes())?;
+        let claim_pubkey = secp256k1::PublicKey::from_slice(&swap.public.claim_pubkey.serialize())?;
+        let claim_privkey =
+            secp256k1::SecretKey::from_byte_array(&swap.private.claim_privkey.secret_bytes())?;
+
+        let mut key_agg_cache = self.key_agg_cache(swap)?;
+        let _ = key_agg_cache.pubkey_xonly_tweak_add(&self.musig_secp, &tweak_scalar)?;
+        let session_id = MusigSessionId::assume_unique_per_nonce_gen(
+            self.privkey_provider.new_private_key()?.secret_bytes(),
+        );
+
+        let mut sighasher = SighashCache::new(tx);
+        let prevouts = Prevouts::All(&prevouts);
+        let sighash = sighasher
+            .taproot_key_spend_signature_hash(input_index, &prevouts, TapSighashType::All)
+            .map_err(TaprootError::TaprootSighash)?;
+        let msg = secp256k1::Message::from_digest(sighash.to_byte_array());
+        let extra_rand = self.privkey_provider.new_private_key()?.secret_bytes();
+
+        let (our_sec_nonce, our_pub_nonce) = key_agg_cache.nonce_gen(
+            &self.musig_secp,
+            session_id,
+            claim_pubkey,
+            msg,
+            Some(extra_rand),
+        )?;
+        let agg_nonce = MusigAggNonce::new(&self.musig_secp, &[&our_pub_nonce, &their_pub_nonce]);
+        let musig_session = MusigSession::new(&self.musig_secp, &key_agg_cache, agg_nonce, msg);
+
+        let partial_sig = musig_session.partial_sign(
+            &self.musig_secp,
+            our_sec_nonce,
+            &claim_privkey.keypair(&self.musig_secp),
+            &key_agg_cache,
+        )?;
+        Ok((partial_sig, our_pub_nonce))
+    }
+
+    fn key_agg_cache(&self, swap: &Swap) -> Result<MusigKeyAggCache, TaprootError> {
+        // TODO: Remove conversion once bitcoin crate contains musig module.
+        let cp = secp256k1::PublicKey::from_slice(&swap.public.claim_pubkey.serialize())?;
+        let rp = secp256k1::PublicKey::from_slice(&swap.public.refund_pubkey.serialize())?;
+        Ok(MusigKeyAggCache::new(&self.musig_secp, &[&cp, &rp]))
+    }
+
     fn taproot_spend_info(&self, swap: &Swap) -> Result<TaprootSpendInfo, TaprootError> {
-        // TODO: Replace musig2 library with rust-bitcoin musig2 when available.
-        let cp = musig2::secp256k1::PublicKey::from_byte_array_compressed(
-            &swap.public.claim_pubkey.serialize(),
-        )?;
-        let rp = musig2::secp256k1::PublicKey::from_byte_array_compressed(
-            &swap.public.refund_pubkey.serialize(),
-        )?;
-        let m = musig2::KeyAggContext::new([cp, rp])?;
-        let mp: musig2::secp256k1::PublicKey = m.aggregated_pubkey();
-        let musig_pubkey = PublicKey::from_slice(&mp.serialize())?;
-        let (internal_key, _) = musig_pubkey.x_only_public_key();
+        let m = self.key_agg_cache(swap)?;
+        let internal_key = m.agg_pk();
+
+        // TODO: Remove conversion once bitcoin crate contains musig module.
+        let internal_key = XOnlyPublicKey::from_slice(&internal_key.serialize())?;
 
         // claim and refund scripts go in a taptree.
         Ok(TaprootBuilder::new()
@@ -317,33 +358,29 @@ where
 
 #[derive(Debug, Error)]
 pub enum TaprootError {
-    #[error("musig: {0}")]
-    Musig(musig2::secp256k1::Error),
-    #[error("key agg: {0}")]
-    KeyAgg(musig2::errors::KeyAggError),
-    #[error("key: {0}")]
-    Key(bitcoin::secp256k1::Error),
+    #[error("secp256k1: {0}")]
+    Secp256k1(secp256k1::Error),
+    #[error("bitcoin secp256k1: {0}")]
+    BitcoinSecp256k1(bitcoin::secp256k1::Error),
     #[error("taproot builder: {0}")]
     TaprootBuilder(bitcoin::taproot::TaprootBuilderError),
     #[error("could not finalize taproot spend info")]
-    Taproot(bitcoin::taproot::TaprootBuilder),
+    TaprootSpend(bitcoin::taproot::TaprootBuilder),
+    #[error("taproot: {0}")]
+    TaprootSighash(bitcoin::sighash::TaprootError),
+    #[error("missing control block")]
+    MissingControlBlock,
 }
 
-impl From<musig2::secp256k1::Error> for TaprootError {
-    fn from(value: musig2::secp256k1::Error) -> Self {
-        TaprootError::Musig(value)
-    }
-}
-
-impl From<musig2::errors::KeyAggError> for TaprootError {
-    fn from(value: musig2::errors::KeyAggError) -> Self {
-        TaprootError::KeyAgg(value)
+impl From<secp256k1::Error> for TaprootError {
+    fn from(value: secp256k1::Error) -> Self {
+        TaprootError::Secp256k1(value)
     }
 }
 
 impl From<bitcoin::secp256k1::Error> for TaprootError {
     fn from(value: bitcoin::secp256k1::Error) -> Self {
-        TaprootError::Key(value)
+        TaprootError::BitcoinSecp256k1(value)
     }
 }
 
@@ -355,71 +392,56 @@ impl From<bitcoin::taproot::TaprootBuilderError> for TaprootError {
 
 impl From<bitcoin::taproot::TaprootBuilder> for TaprootError {
     fn from(value: bitcoin::taproot::TaprootBuilder) -> Self {
-        TaprootError::Taproot(value)
+        TaprootError::TaprootSpend(value)
     }
 }
 
-impl From<bitcoin::absolute::ConversionError> for CreateSwapError {
-    fn from(_value: bitcoin::absolute::ConversionError) -> Self {
-        CreateSwapError::InvalidBlockHeight
+impl From<PrivateKeyError> for SwapError {
+    fn from(value: PrivateKeyError) -> Self {
+        SwapError::PrivateKey(value)
     }
 }
 
-impl From<TaprootError> for CreateSwapError {
+impl From<bitcoin::locktime::absolute::ConversionError> for SwapError {
+    fn from(value: bitcoin::locktime::absolute::ConversionError) -> Self {
+        SwapError::InvalidBlockHeight(value)
+    }
+}
+
+impl From<TaprootError> for SwapError {
     fn from(value: TaprootError) -> Self {
-        CreateSwapError::Taproot(value)
+        SwapError::Taproot(value)
     }
 }
 
-impl From<TaprootError> for CreateClaimTxError {
-    fn from(value: TaprootError) -> Self {
-        CreateClaimTxError::Taproot(value)
+impl From<secp256k1::scalar::OutOfRangeError> for SwapError {
+    fn from(value: secp256k1::scalar::OutOfRangeError) -> Self {
+        error!("conversion error, out of range: {:?}", value);
+        SwapError::Conversion
     }
 }
 
-impl From<bitcoin::absolute::ConversionError> for CreateClaimTxError {
-    fn from(_value: bitcoin::absolute::ConversionError) -> Self {
-        CreateClaimTxError::InvalidBlockHeight
+impl From<secp256k1::Error> for SwapError {
+    fn from(value: secp256k1::Error) -> Self {
+        error!("conversion error, secp: {:?}", value);
+        SwapError::Conversion
     }
 }
 
-impl From<bitcoin::blockdata::transaction::InputsIndexError> for CreateClaimTxError {
-    fn from(_value: bitcoin::blockdata::transaction::InputsIndexError) -> Self {
-        CreateClaimTxError::InvalidSigningData
+impl From<secp256k1::musig::MusigTweakErr> for SwapError {
+    fn from(value: secp256k1::musig::MusigTweakErr) -> Self {
+        SwapError::MusigTweak(value)
     }
 }
 
-impl From<bitcoin::sighash::TaprootError> for CreateClaimTxError {
-    fn from(value: bitcoin::sighash::TaprootError) -> Self {
-        trace!(taproot_error = field::debug(&value));
-        match value {
-            sighash::TaprootError::InputsIndex(_) => CreateClaimTxError::InvalidMessage,
-            sighash::TaprootError::SingleMissingOutput(_) => CreateClaimTxError::InvalidMessage,
-            sighash::TaprootError::PrevoutsSize(_) => CreateClaimTxError::InvalidMessage,
-            sighash::TaprootError::PrevoutsIndex(_) => CreateClaimTxError::InvalidMessage,
-            sighash::TaprootError::PrevoutsKind(_) => CreateClaimTxError::InvalidMessage,
-            sighash::TaprootError::InvalidSighashType(_) => CreateClaimTxError::InvalidMessage,
-            _ => CreateClaimTxError::InvalidMessage,
-        }
+impl From<secp256k1::musig::MusigNonceGenError> for SwapError {
+    fn from(value: secp256k1::musig::MusigNonceGenError) -> Self {
+        SwapError::NonceGen(value)
     }
 }
 
-impl From<bitcoin::secp256k1::Error> for CreateClaimTxError {
-    fn from(value: bitcoin::secp256k1::Error) -> Self {
-        trace!(secp256k1_error = field::debug(value));
-        match value {
-            bitcoin::secp256k1::Error::IncorrectSignature => CreateClaimTxError::InvalidSignature,
-            bitcoin::secp256k1::Error::InvalidMessage => CreateClaimTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidPublicKey => CreateClaimTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidSignature => CreateClaimTxError::InvalidSignature,
-            bitcoin::secp256k1::Error::InvalidSecretKey => CreateClaimTxError::InvalidSecretKey,
-            bitcoin::secp256k1::Error::InvalidSharedSecret => CreateClaimTxError::InvalidSecretKey,
-            bitcoin::secp256k1::Error::InvalidRecoveryId => CreateClaimTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidTweak => CreateClaimTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::NotEnoughMemory => CreateClaimTxError::NotEnoughMemory,
-            bitcoin::secp256k1::Error::InvalidPublicKeySum => CreateClaimTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidParityValue(_) => CreateClaimTxError::InvalidMessage,
-            bitcoin::secp256k1::Error::InvalidEllSwift => CreateClaimTxError::InvalidMessage,
-        }
+impl From<secp256k1::musig::MusigSignError> for SwapError {
+    fn from(value: secp256k1::musig::MusigSignError) -> Self {
+        SwapError::Sign(value)
     }
 }
