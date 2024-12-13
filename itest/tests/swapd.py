@@ -102,7 +102,7 @@ class SwapD(TailableProc):
         self.opts["bitcoind-rpc-address"] = "http://127.0.0.1:{}".format(
             self.bitcoindproxy.rpcport
         )
-        self.logger.debug("starting swapd with commandline: '{}'", self.cmd_line)
+        self.logger.debug("starting swapd with commandline: '{}'".format(' '.join(self.cmd_line)))
         TailableProc.start(self, stdin, stdout_redir=True, stderr_redir=stderr_redir)
         if wait_for_initialized:
             self.wait_for_log("swapd started")
