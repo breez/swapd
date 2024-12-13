@@ -211,6 +211,8 @@ class SwapdServer(object):
         self.daemon.start(stderr_redir=stderr_redir)
         if wait_for_bitcoind_sync:
             wait_for(self.is_synced)
+            self.logger.debug("swapd is synced")
+        self.logger.debug("swapd is started")
 
     def is_synced(self):
         height = self.bitcoind.rpc.getblockchaininfo()["blocks"]
