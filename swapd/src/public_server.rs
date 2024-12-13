@@ -429,10 +429,12 @@ where
         Ok(Response::new(response))
     }
 
+    #[instrument(skip(self), level = "debug")]
     async fn refund_swap(
         &self,
         request: Request<RefundSwapRequest>,
     ) -> Result<Response<RefundSwapResponse>, Status> {
+        debug!("refund_swap request");
         let req = request.into_inner();
         let tx = Transaction::consensus_decode(&mut req.transaction.as_slice()).map_err(|e| {
             trace!("got invalid transaction: {:?}", e);

@@ -19,7 +19,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\nswap.proto\x12\x04swap"8\n\x11\x43reateSwapRequest\x12\x0c\n\x04hash\x18\x01 \x01(\x0c\x12\x15\n\rrefund_pubkey\x18\x02 \x01(\x0c"P\n\x12\x43reateSwapResponse\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12\x14\n\x0c\x63laim_pubkey\x18\x02 \x01(\x0c\x12\x13\n\x0block_height\x18\x03 \x01(\r")\n\x0ePaySwapRequest\x12\x17\n\x0fpayment_request\x18\x01 \x01(\t"\x11\n\x0fPaySwapResponse"L\n\x11RefundSwapRequest\x12\r\n\x05nonce\x18\x01 \x01(\x0c\x12\x13\n\x0btransaction\x18\x02 \x01(\x0c\x12\x13\n\x0binput_index\x18\x03 \x01(\r">\n\x12RefundSwapResponse\x12\r\n\x05nonce\x18\x01 \x01(\x0c\x12\x19\n\x11partial_signature\x18\x02 \x01(\x0c\x32\xc9\x01\n\x07Swapper\x12\x41\n\nCreateSwap\x12\x17.swap.CreateSwapRequest\x1a\x18.swap.CreateSwapResponse"\x00\x12\x38\n\x07PaySwap\x12\x14.swap.PaySwapRequest\x1a\x15.swap.PaySwapResponse"\x00\x12\x41\n\nRefundSwap\x12\x17.swap.RefundSwapRequest\x1a\x18.swap.RefundSwapResponse"\x00\x62\x06proto3'
+    b'\n\nswap.proto\x12\x04swap"8\n\x11\x43reateSwapRequest\x12\x0c\n\x04hash\x18\x01 \x01(\x0c\x12\x15\n\rrefund_pubkey\x18\x02 \x01(\x0c"P\n\x12\x43reateSwapResponse\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12\x14\n\x0c\x63laim_pubkey\x18\x02 \x01(\x0c\x12\x13\n\x0block_height\x18\x03 \x01(\r")\n\x0ePaySwapRequest\x12\x17\n\x0fpayment_request\x18\x01 \x01(\t"\x11\n\x0fPaySwapResponse"a\n\x11RefundSwapRequest\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12\x13\n\x0btransaction\x18\x02 \x01(\x0c\x12\x13\n\x0binput_index\x18\x03 \x01(\r\x12\x11\n\tpub_nonce\x18\x04 \x01(\x0c"B\n\x12RefundSwapResponse\x12\x11\n\tpub_nonce\x18\x01 \x01(\x0c\x12\x19\n\x11partial_signature\x18\x02 \x01(\x0c\x32\xc9\x01\n\x07Swapper\x12\x41\n\nCreateSwap\x12\x17.swap.CreateSwapRequest\x1a\x18.swap.CreateSwapResponse"\x00\x12\x38\n\x07PaySwap\x12\x14.swap.PaySwapRequest\x1a\x15.swap.PaySwapResponse"\x00\x12\x41\n\nRefundSwap\x12\x17.swap.RefundSwapRequest\x1a\x18.swap.RefundSwapResponse"\x00\x62\x06proto3'
 )
 
 _globals = globals()
@@ -36,9 +36,9 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_PAYSWAPRESPONSE"]._serialized_start = 203
     _globals["_PAYSWAPRESPONSE"]._serialized_end = 220
     _globals["_REFUNDSWAPREQUEST"]._serialized_start = 222
-    _globals["_REFUNDSWAPREQUEST"]._serialized_end = 298
-    _globals["_REFUNDSWAPRESPONSE"]._serialized_start = 300
-    _globals["_REFUNDSWAPRESPONSE"]._serialized_end = 362
-    _globals["_SWAPPER"]._serialized_start = 365
-    _globals["_SWAPPER"]._serialized_end = 566
+    _globals["_REFUNDSWAPREQUEST"]._serialized_end = 319
+    _globals["_REFUNDSWAPRESPONSE"]._serialized_start = 321
+    _globals["_REFUNDSWAPRESPONSE"]._serialized_end = 387
+    _globals["_SWAPPER"]._serialized_start = 390
+    _globals["_SWAPPER"]._serialized_end = 591
 # @@protoc_insertion_point(module_scope)

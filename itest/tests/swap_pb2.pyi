@@ -40,26 +40,31 @@ class PaySwapResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class RefundSwapRequest(_message.Message):
-    __slots__ = ("nonce", "transaction", "input_index")
-    NONCE_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("address", "transaction", "input_index", "pub_nonce")
+    ADDRESS_FIELD_NUMBER: _ClassVar[int]
     TRANSACTION_FIELD_NUMBER: _ClassVar[int]
     INPUT_INDEX_FIELD_NUMBER: _ClassVar[int]
-    nonce: bytes
+    PUB_NONCE_FIELD_NUMBER: _ClassVar[int]
+    address: str
     transaction: bytes
     input_index: int
+    pub_nonce: bytes
     def __init__(
         self,
-        nonce: _Optional[bytes] = ...,
+        address: _Optional[str] = ...,
         transaction: _Optional[bytes] = ...,
         input_index: _Optional[int] = ...,
+        pub_nonce: _Optional[bytes] = ...,
     ) -> None: ...
 
 class RefundSwapResponse(_message.Message):
-    __slots__ = ("nonce", "partial_signature")
-    NONCE_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("pub_nonce", "partial_signature")
+    PUB_NONCE_FIELD_NUMBER: _ClassVar[int]
     PARTIAL_SIGNATURE_FIELD_NUMBER: _ClassVar[int]
-    nonce: bytes
+    pub_nonce: bytes
     partial_signature: bytes
     def __init__(
-        self, nonce: _Optional[bytes] = ..., partial_signature: _Optional[bytes] = ...
+        self,
+        pub_nonce: _Optional[bytes] = ...,
+        partial_signature: _Optional[bytes] = ...,
     ) -> None: ...

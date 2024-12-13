@@ -63,13 +63,18 @@ class GetSwapResponse(_message.Message):
     ) -> None: ...
 
 class SwapOutput(_message.Message):
-    __slots__ = ("outpoint", "confirmation_height")
+    __slots__ = ("outpoint", "confirmation_height", "block_hash")
     OUTPOINT_FIELD_NUMBER: _ClassVar[int]
     CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    BLOCK_HASH_FIELD_NUMBER: _ClassVar[int]
     outpoint: str
     confirmation_height: int
+    block_hash: str
     def __init__(
-        self, outpoint: _Optional[str] = ..., confirmation_height: _Optional[int] = ...
+        self,
+        outpoint: _Optional[str] = ...,
+        confirmation_height: _Optional[int] = ...,
+        block_hash: _Optional[str] = ...,
     ) -> None: ...
 
 class ListClaimableRequest(_message.Message):
@@ -90,6 +95,7 @@ class ClaimableUtxo(_message.Message):
         "swap_hash",
         "lock_height",
         "confirmation_height",
+        "block_hash",
         "blocks_left",
         "paid_with_request",
     )
@@ -97,12 +103,14 @@ class ClaimableUtxo(_message.Message):
     SWAP_HASH_FIELD_NUMBER: _ClassVar[int]
     LOCK_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    BLOCK_HASH_FIELD_NUMBER: _ClassVar[int]
     BLOCKS_LEFT_FIELD_NUMBER: _ClassVar[int]
     PAID_WITH_REQUEST_FIELD_NUMBER: _ClassVar[int]
     outpoint: str
     swap_hash: str
     lock_height: int
     confirmation_height: int
+    block_hash: str
     blocks_left: int
     paid_with_request: str
     def __init__(
@@ -111,6 +119,7 @@ class ClaimableUtxo(_message.Message):
         swap_hash: _Optional[str] = ...,
         lock_height: _Optional[int] = ...,
         confirmation_height: _Optional[int] = ...,
+        block_hash: _Optional[str] = ...,
         blocks_left: _Optional[int] = ...,
         paid_with_request: _Optional[str] = ...,
     ) -> None: ...

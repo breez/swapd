@@ -211,8 +211,11 @@ class LndNode(object):
             p["pub_key"] for p in self.rpc.list_peers()["peers"]
         ]
 
+    def new_address(self):
+        return self.rpc.new_address("p2tr")["address"]
+
     def fund_wallet(self, amount, mine_block=True):
-        addr = self.rpc.new_address("p2tr")["address"]
+        addr = self.new_address()
         txid = self.bitcoin.rpc.sendtoaddress(addr, amount / 10**8)
         if mine_block:
             self.bitcoin.generate_block(1)

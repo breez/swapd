@@ -254,7 +254,12 @@ where
 
             let mut sighasher = sighash::SighashCache::new(&tx);
             let sighash = sighasher
-                .taproot_script_spend_signature_hash(n, &prevouts, leaf_hash, TapSighashType::All)
+                .taproot_script_spend_signature_hash(
+                    n,
+                    &prevouts,
+                    leaf_hash,
+                    TapSighashType::Default,
+                )
                 .map_err(TaprootError::TaprootSighash)?;
 
             let rnd = self.privkey_provider.new_private_key()?.secret_bytes();
@@ -266,7 +271,7 @@ where
             );
             let signature = Signature {
                 signature,
-                sighash_type: TapSighashType::All,
+                sighash_type: TapSighashType::Default,
             };
             let control_block = self
                 .taproot_spend_info(&c.swap)?
@@ -310,7 +315,7 @@ where
         let mut sighasher = SighashCache::new(tx);
         let prevouts = Prevouts::All(&prevouts);
         let sighash = sighasher
-            .taproot_key_spend_signature_hash(input_index, &prevouts, TapSighashType::All)
+            .taproot_key_spend_signature_hash(input_index, &prevouts, TapSighashType::Default)
             .map_err(TaprootError::TaprootSighash)?;
         let msg = secp256k1::Message::from_digest(sighash.to_byte_array());
         let extra_rand = self.privkey_provider.new_private_key()?.secret_bytes();

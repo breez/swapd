@@ -287,6 +287,15 @@ class SwapperGrpc(object):
         payload = swap_pb2.PaySwapRequest(payment_request=payment_request)
         return self.stub.PaySwap(payload)
 
+    def refund_swap(self, address, transaction, input_index, pub_nonce):
+        payload = swap_pb2.RefundSwapRequest(
+            address=address,
+            transaction=transaction,
+            input_index=input_index,
+            pub_nonce=pub_nonce,
+        )
+        return self.stub.RefundSwap(payload)
+
 
 class SwapManagerGrpc(object):
     def __init__(

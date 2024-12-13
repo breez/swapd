@@ -2,7 +2,9 @@ from helpers import *
 import grpc
 
 
-def test_pay_after_deadline_fails(node_factory, swapd_factory, lock_time, min_claim_blocks):
+def test_pay_after_deadline_fails(
+    node_factory, swapd_factory, lock_time, min_claim_blocks
+):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
     address, payment_request, _ = create_swap(user, swapper)
@@ -14,7 +16,9 @@ def test_pay_after_deadline_fails(node_factory, swapd_factory, lock_time, min_cl
     height = user.bitcoin.rpc.getblockcount()
     blocks_to_add = lock_time - min_claim_blocks - 1
     user.bitcoin.generate_block(blocks_to_add)
-    user.bitcoin.wait_for_log(r"UpdateTip: new best=.* height={}".format(height + blocks_to_add))
+    user.bitcoin.wait_for_log(
+        r"UpdateTip: new best=.* height={}".format(height + blocks_to_add)
+    )
 
     try:
         swapper.rpc.pay_swap(payment_request)

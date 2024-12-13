@@ -24,6 +24,7 @@ __all__ = [
     "SLOW_MACHINE",
     "setup_user_router_swapper",
     "setup_user_and_swapper",
+    "create_swap_no_invoice_extended",
     "create_swap_no_invoice",
     "create_swap",
     "whatthefee",
@@ -52,16 +53,28 @@ def setup_user_and_swapper(node_factory, swapd_factory, swapd_opts=None):
     return user, swapper
 
 
-def create_swap_no_invoice(user, swapper):
+def create_swap_no_invoice_extended(user: ClnNode, swapper: SwapdServer):
     preimage = os.urandom(32)
     h = hashlib.sha256(preimage).digest()
     refund_privkey = PrivateKey()
     refund_pubkey = refund_privkey.get_public_key().to_hex()
     create_swap_resp = swapper.rpc.create_swap(user, refund_pubkey, h)
-    return create_swap_resp.address, preimage.hex(), h.hex()
+    return (
+        create_swap_resp.address,
+        preimage.hex(),
+        h.hex(),
+        refund_privkey,
+        create_swap_resp.claim_pubkey,
+        create_swap_resp.lock_height,
+    )
 
 
-def create_swap(user, swapper, amount=100_000_000):
+def create_swap_no_invoice(user: ClnNode, swapper: SwapdServer):
+    address, preimage, h, _, _ = create_swap_no_invoice_extended(user, swapper)
+    return address, preimage, h
+
+
+def create_swap(user: ClnNode, swapper: SwapdServer, amount=100_000_000):
     address, preimage, h = create_swap_no_invoice(user, swapper)
     payment_request = user.create_invoice(
         amount,

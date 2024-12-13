@@ -19,7 +19,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x13swap_internal.proto\x12\rswap_internal"-\n\x18\x41\x64\x64\x41\x64\x64ressFiltersRequest\x12\x11\n\taddresses\x18\x01 \x03(\t"\x1b\n\x19\x41\x64\x64\x41\x64\x64ressFiltersResponse"\x10\n\x0eGetInfoRequest"8\n\x0fGetInfoResponse\x12\x14\n\x0c\x62lock_height\x18\x01 \x01(\x04\x12\x0f\n\x07network\x18\x02 \x01(\t"\x90\x01\n\x0eGetSwapRequest\x12\x14\n\x07\x61\x64\x64ress\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x1c\n\x0fpayment_request\x18\x02 \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0cpayment_hash\x18\x03 \x01(\x0cH\x02\x88\x01\x01\x42\n\n\x08_addressB\x12\n\x10_payment_requestB\x0f\n\r_payment_hash"N\n\x0fGetSwapResponse\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12*\n\x07outputs\x18\x02 \x03(\x0b\x32\x19.swap_internal.SwapOutput"X\n\nSwapOutput\x12\x10\n\x08outpoint\x18\x01 \x01(\t\x12 \n\x13\x63onfirmation_height\x18\x02 \x01(\x04H\x00\x88\x01\x01\x42\x16\n\x14_confirmation_height"\x16\n\x14ListClaimableRequest"I\n\x15ListClaimableResponse\x12\x30\n\nclaimables\x18\x01 \x03(\x0b\x32\x1c.swap_internal.ClaimableUtxo"\xb1\x01\n\rClaimableUtxo\x12\x10\n\x08outpoint\x18\x01 \x01(\t\x12\x11\n\tswap_hash\x18\x02 \x01(\t\x12\x13\n\x0block_height\x18\x03 \x01(\r\x12\x1b\n\x13\x63onfirmation_height\x18\x04 \x01(\x04\x12\x13\n\x0b\x62locks_left\x18\x05 \x01(\x05\x12\x1e\n\x11paid_with_request\x18\x06 \x01(\tH\x00\x88\x01\x01\x42\x14\n\x12_paid_with_request"\x96\x01\n\x0c\x43laimRequest\x12\x11\n\toutpoints\x18\x01 \x03(\t\x12 \n\x13\x64\x65stination_address\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x17\n\nfee_per_kw\x18\x03 \x01(\rH\x01\x88\x01\x01\x12\x11\n\tauto_bump\x18\x04 \x01(\x08\x42\x16\n\x14_destination_addressB\r\n\x0b_fee_per_kw"2\n\rClaimResponse\x12\r\n\x05tx_id\x18\x01 \x01(\t\x12\x12\n\nfee_per_kw\x18\x02 \x01(\r"\r\n\x0bStopRequest"\x0e\n\x0cStopResponse2\xf6\x03\n\x0bSwapManager\x12h\n\x11\x41\x64\x64\x41\x64\x64ressFilters\x12\'.swap_internal.AddAddressFiltersRequest\x1a(.swap_internal.AddAddressFiltersResponse"\x00\x12J\n\x07GetInfo\x12\x1d.swap_internal.GetInfoRequest\x1a\x1e.swap_internal.GetInfoResponse"\x00\x12J\n\x07GetSwap\x12\x1d.swap_internal.GetSwapRequest\x1a\x1e.swap_internal.GetSwapResponse"\x00\x12\\\n\rListClaimable\x12#.swap_internal.ListClaimableRequest\x1a$.swap_internal.ListClaimableResponse"\x00\x12\x44\n\x05\x43laim\x12\x1b.swap_internal.ClaimRequest\x1a\x1c.swap_internal.ClaimResponse"\x00\x12\x41\n\x04Stop\x12\x1a.swap_internal.StopRequest\x1a\x1b.swap_internal.StopResponse"\x00\x62\x06proto3'
+    b'\n\x13swap_internal.proto\x12\rswap_internal"-\n\x18\x41\x64\x64\x41\x64\x64ressFiltersRequest\x12\x11\n\taddresses\x18\x01 \x03(\t"\x1b\n\x19\x41\x64\x64\x41\x64\x64ressFiltersResponse"\x10\n\x0eGetInfoRequest"8\n\x0fGetInfoResponse\x12\x14\n\x0c\x62lock_height\x18\x01 \x01(\x04\x12\x0f\n\x07network\x18\x02 \x01(\t"\x90\x01\n\x0eGetSwapRequest\x12\x14\n\x07\x61\x64\x64ress\x18\x01 \x01(\tH\x00\x88\x01\x01\x12\x1c\n\x0fpayment_request\x18\x02 \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0cpayment_hash\x18\x03 \x01(\x0cH\x02\x88\x01\x01\x42\n\n\x08_addressB\x12\n\x10_payment_requestB\x0f\n\r_payment_hash"N\n\x0fGetSwapResponse\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12*\n\x07outputs\x18\x02 \x03(\x0b\x32\x19.swap_internal.SwapOutput"\x80\x01\n\nSwapOutput\x12\x10\n\x08outpoint\x18\x01 \x01(\t\x12 \n\x13\x63onfirmation_height\x18\x02 \x01(\x04H\x00\x88\x01\x01\x12\x17\n\nblock_hash\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x16\n\x14_confirmation_heightB\r\n\x0b_block_hash"\x16\n\x14ListClaimableRequest"I\n\x15ListClaimableResponse\x12\x30\n\nclaimables\x18\x01 \x03(\x0b\x32\x1c.swap_internal.ClaimableUtxo"\xc5\x01\n\rClaimableUtxo\x12\x10\n\x08outpoint\x18\x01 \x01(\t\x12\x11\n\tswap_hash\x18\x02 \x01(\t\x12\x13\n\x0block_height\x18\x03 \x01(\r\x12\x1b\n\x13\x63onfirmation_height\x18\x04 \x01(\x04\x12\x12\n\nblock_hash\x18\x05 \x01(\t\x12\x13\n\x0b\x62locks_left\x18\x06 \x01(\x05\x12\x1e\n\x11paid_with_request\x18\x07 \x01(\tH\x00\x88\x01\x01\x42\x14\n\x12_paid_with_request"\x96\x01\n\x0c\x43laimRequest\x12\x11\n\toutpoints\x18\x01 \x03(\t\x12 \n\x13\x64\x65stination_address\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x17\n\nfee_per_kw\x18\x03 \x01(\rH\x01\x88\x01\x01\x12\x11\n\tauto_bump\x18\x04 \x01(\x08\x42\x16\n\x14_destination_addressB\r\n\x0b_fee_per_kw"2\n\rClaimResponse\x12\r\n\x05tx_id\x18\x01 \x01(\t\x12\x12\n\nfee_per_kw\x18\x02 \x01(\r"\r\n\x0bStopRequest"\x0e\n\x0cStopResponse2\xf6\x03\n\x0bSwapManager\x12h\n\x11\x41\x64\x64\x41\x64\x64ressFilters\x12\'.swap_internal.AddAddressFiltersRequest\x1a(.swap_internal.AddAddressFiltersResponse"\x00\x12J\n\x07GetInfo\x12\x1d.swap_internal.GetInfoRequest\x1a\x1e.swap_internal.GetInfoResponse"\x00\x12J\n\x07GetSwap\x12\x1d.swap_internal.GetSwapRequest\x1a\x1e.swap_internal.GetSwapResponse"\x00\x12\\\n\rListClaimable\x12#.swap_internal.ListClaimableRequest\x1a$.swap_internal.ListClaimableResponse"\x00\x12\x44\n\x05\x43laim\x12\x1b.swap_internal.ClaimRequest\x1a\x1c.swap_internal.ClaimResponse"\x00\x12\x41\n\x04Stop\x12\x1a.swap_internal.StopRequest\x1a\x1b.swap_internal.StopResponse"\x00\x62\x06proto3'
 )
 
 _globals = globals()
@@ -39,22 +39,22 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_GETSWAPREQUEST"]._serialized_end = 335
     _globals["_GETSWAPRESPONSE"]._serialized_start = 337
     _globals["_GETSWAPRESPONSE"]._serialized_end = 415
-    _globals["_SWAPOUTPUT"]._serialized_start = 417
-    _globals["_SWAPOUTPUT"]._serialized_end = 505
-    _globals["_LISTCLAIMABLEREQUEST"]._serialized_start = 507
-    _globals["_LISTCLAIMABLEREQUEST"]._serialized_end = 529
-    _globals["_LISTCLAIMABLERESPONSE"]._serialized_start = 531
-    _globals["_LISTCLAIMABLERESPONSE"]._serialized_end = 604
-    _globals["_CLAIMABLEUTXO"]._serialized_start = 607
-    _globals["_CLAIMABLEUTXO"]._serialized_end = 784
-    _globals["_CLAIMREQUEST"]._serialized_start = 787
-    _globals["_CLAIMREQUEST"]._serialized_end = 937
-    _globals["_CLAIMRESPONSE"]._serialized_start = 939
-    _globals["_CLAIMRESPONSE"]._serialized_end = 989
-    _globals["_STOPREQUEST"]._serialized_start = 991
-    _globals["_STOPREQUEST"]._serialized_end = 1004
-    _globals["_STOPRESPONSE"]._serialized_start = 1006
-    _globals["_STOPRESPONSE"]._serialized_end = 1020
-    _globals["_SWAPMANAGER"]._serialized_start = 1023
-    _globals["_SWAPMANAGER"]._serialized_end = 1525
+    _globals["_SWAPOUTPUT"]._serialized_start = 418
+    _globals["_SWAPOUTPUT"]._serialized_end = 546
+    _globals["_LISTCLAIMABLEREQUEST"]._serialized_start = 548
+    _globals["_LISTCLAIMABLEREQUEST"]._serialized_end = 570
+    _globals["_LISTCLAIMABLERESPONSE"]._serialized_start = 572
+    _globals["_LISTCLAIMABLERESPONSE"]._serialized_end = 645
+    _globals["_CLAIMABLEUTXO"]._serialized_start = 648
+    _globals["_CLAIMABLEUTXO"]._serialized_end = 845
+    _globals["_CLAIMREQUEST"]._serialized_start = 848
+    _globals["_CLAIMREQUEST"]._serialized_end = 998
+    _globals["_CLAIMRESPONSE"]._serialized_start = 1000
+    _globals["_CLAIMRESPONSE"]._serialized_end = 1050
+    _globals["_STOPREQUEST"]._serialized_start = 1052
+    _globals["_STOPREQUEST"]._serialized_end = 1065
+    _globals["_STOPRESPONSE"]._serialized_start = 1067
+    _globals["_STOPRESPONSE"]._serialized_end = 1081
+    _globals["_SWAPMANAGER"]._serialized_start = 1084
+    _globals["_SWAPMANAGER"]._serialized_end = 1586
 # @@protoc_insertion_point(module_scope)

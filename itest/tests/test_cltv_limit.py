@@ -6,7 +6,7 @@ def test_below_cltv_limit(
     node_factory, swapd_factory, lock_time, min_claim_blocks, min_viable_cltv
 ):
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, preimage, payment_hash = create_swap_no_invoice(user, swapper)
+    address, preimage, payment_hash, _ = create_swap_no_invoice(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
@@ -30,7 +30,7 @@ def test_on_cltv_limit(
     node_factory, swapd_factory, lock_time, min_claim_blocks, min_viable_cltv
 ):
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, preimage, payment_hash = create_swap_no_invoice(user, swapper)
+    address, preimage, payment_hash, _ = create_swap_no_invoice(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
@@ -53,7 +53,7 @@ def test_below_cltv_limit_with_router(
     user, router, swapper = setup_user_router_swapper(
         node_factory, swapd_factory, swapd_opts={"min-viable-cltv": 0}
     )
-    address, preimage, payment_hash = create_swap_no_invoice(user, swapper)
+    address, preimage, payment_hash, _ = create_swap_no_invoice(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
@@ -81,7 +81,7 @@ def test_on_cltv_limit_with_router(
     user, router, swapper = setup_user_router_swapper(
         node_factory, swapd_factory, swapd_opts={"min-viable-cltv": 0}
     )
-    address, preimage, payment_hash = create_swap_no_invoice(user, swapper)
+    address, preimage, payment_hash, _ = create_swap_no_invoice(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 

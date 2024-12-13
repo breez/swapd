@@ -43,6 +43,9 @@ class ClnNode:
             p["id"] for p in self.node.rpc.listpeers()["peers"]
         ]
 
+    def new_address(self):
+        return self.node.rpc.newaddr("p2tr")["p2tr"]
+
     def fund_wallet(self, amount):
         return self.node.fundwallet(10 * amount)
 
