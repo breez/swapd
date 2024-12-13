@@ -2,13 +2,13 @@ use bitcoin::{
     hashes::{sha256, Hash},
     Network,
 };
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
 use regex::Regex;
 use thiserror::Error;
 use tokio::join;
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig, Identity, Uri},
-    Request, Status,
+    Status,
 };
 use tracing::{debug, error, instrument, warn};
 
@@ -72,10 +72,10 @@ impl LightningClient for Client {
     ) -> Result<Option<PreimageResult>, LightningError> {
         let mut client = self.get_client().await?;
         let resp = client
-            .list_pays(Request::new(ListpaysRequest {
+            .list_pays(ListpaysRequest {
                 payment_hash: Some(hash.as_byte_array().to_vec()),
                 ..Default::default()
-            }))
+            })
             .await?;
 
         let result = match resp
@@ -98,11 +98,41 @@ impl LightningClient for Client {
     }
 
     #[instrument(level = "trace", skip(self))]
+    async fn has_pending_or_complete_payment(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<bool, LightningError> {
+        let mut client = self.get_client().await?;
+        let mut clone = client.clone();
+        let fut1 = clone.list_send_pays(ListsendpaysRequest {
+            payment_hash: Some(hash.as_byte_array().to_vec()),
+            status: Some(ListsendpaysStatus::Pending.into()),
+            ..Default::default()
+        });
+
+        let fut2 = client.list_send_pays(ListsendpaysRequest {
+            payment_hash: Some(hash.as_byte_array().to_vec()),
+            status: Some(ListsendpaysStatus::Complete.into()),
+            ..Default::default()
+        });
+
+        let resps = join_all([fut1, fut2]).await;
+        for resp in resps {
+            let resp = resp?;
+            if !resp.into_inner().payments.is_empty() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, LightningError> {
         let mut client = self.get_client().await?;
 
         let pay_resp = match client
-            .pay(Request::new(PayRequest {
+            .pay(PayRequest {
                 label: Some(request.label),
                 bolt11: request.bolt11,
                 maxfee: Some(Amount {
@@ -111,7 +141,7 @@ impl LightningClient for Client {
                 retry_for: Some(request.timeout_seconds as u32),
                 maxdelay: Some(request.cltv_limit),
                 ..Default::default()
-            }))
+            })
             .await
         {
             Ok(resp) => resp,
@@ -167,22 +197,22 @@ async fn wait_payment<'a>(
     payment_hash: sha256::Hash,
 ) -> Result<Option<PaymentResult>, LightningError> {
     let mut client2 = client.clone();
-    let completed_payments_fut = client.list_send_pays(Request::new(ListsendpaysRequest {
+    let completed_payments_fut = client.list_send_pays(ListsendpaysRequest {
         payment_hash: Some(payment_hash.as_byte_array().to_vec()),
         bolt11: None,
         index: None,
         limit: None,
         start: None,
         status: Some(ListsendpaysStatus::Complete.into()),
-    }));
-    let pending_payments_fut = client2.list_send_pays(Request::new(ListsendpaysRequest {
+    });
+    let pending_payments_fut = client2.list_send_pays(ListsendpaysRequest {
         payment_hash: Some(payment_hash.as_byte_array().to_vec()),
         bolt11: None,
         index: None,
         limit: None,
         start: None,
         status: Some(ListsendpaysStatus::Pending.into()),
-    }));
+    });
     let (completed_payments, pending_payments) =
         join!(completed_payments_fut, pending_payments_fut);
     let (completed_payments, pending_payments) = (completed_payments?, pending_payments?);
@@ -206,12 +236,12 @@ async fn wait_payment<'a>(
         let mut client = client.clone();
         tasks.push(async move {
             client
-                .wait_send_pay(Request::new(WaitsendpayRequest {
+                .wait_send_pay(WaitsendpayRequest {
                     groupid: Some(payment.groupid),
                     partid: payment.partid,
                     payment_hash: payment_hash.as_byte_array().to_vec(),
                     timeout: None,
-                }))
+                })
                 .await
         });
     }

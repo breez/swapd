@@ -190,6 +190,40 @@ where
     }
 
     #[instrument(level = "trace", skip(self))]
+    async fn has_pending_or_complete_payment(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<bool, LightningError> {
+        let mut router_client = self.get_router_client().await?;
+        let res = router_client
+            .track_payment_v2(TrackPaymentRequest {
+                payment_hash: hash.as_byte_array().to_vec(),
+                no_inflight_updates: false,
+            })
+            .await;
+        let mut stream = match res {
+            Ok(res) => res.into_inner(),
+            Err(e) => {
+                return match e.code() {
+                    tonic::Code::NotFound => Ok(false),
+                    _ => Err(LightningError::General(e)),
+                }
+            }
+        };
+        let payment = match stream.message().await? {
+            Some(message) => message,
+            None => return Err(LightningError::ConnectionFailed),
+        };
+        Ok(match payment.status() {
+            PaymentStatus::Unknown => true,
+            PaymentStatus::InFlight => true,
+            PaymentStatus::Succeeded => true,
+            PaymentStatus::Failed => false,
+            PaymentStatus::Initiated => true,
+        })
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn pay(
         &self,
         request: crate::lightning::PaymentRequest,

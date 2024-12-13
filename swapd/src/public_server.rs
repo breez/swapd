@@ -23,7 +23,7 @@ use crate::{
     },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, LightningError, PaymentRequest, PaymentResult},
-    swap::{ClaimableUtxo, PaymentAttempt},
+    swap::{ClaimableUtxo, LockSwapError, LockType, PaymentAttempt},
 };
 
 use crate::swap::{
@@ -358,6 +358,20 @@ where
             })?
             .as_nanos();
         let label = format!("{}-{}", hash, unix_ns_now);
+        match self
+            .swap_repository
+            .lock_swap(&swap_state.swap, LockType::Pay)
+            .await
+        {
+            Ok(_) => {}
+            Err(LockSwapError::AlreadyLocked) => {
+                return Err(Status::failed_precondition("swap is locked"))
+            }
+            Err(e) => {
+                error!("failed to lock swap for payment: {:?}", e);
+                return Err(Status::internal("internal error"));
+            }
+        };
         self.swap_repository
             .add_payment_attempt(&PaymentAttempt {
                 amount_msat,
@@ -410,6 +424,7 @@ where
             }
         };
 
+        let _ = self.swap_repository.unlock_swap(&swap_state.swap).await;
         let response = match pay_result {
             PaymentResult::Success { preimage: _ } => {
                 info!(
@@ -508,6 +523,49 @@ where
                 error!("failed to sign refund transaction: {:?}", e);
                 Status::internal("internal error")
             })?;
+
+        // Ensure this swap is not used for paying out at the moment, also
+        // prevent payouts from happening in the future. Note this will never be
+        // unlocked, because the user may steal funds if it's ever paid out. The
+        // user _can_ create a new refund later, however.
+        let was_locked = match self
+            .swap_repository
+            .lock_swap(&swap.swap, LockType::Refund)
+            .await
+        {
+            Ok(old_lock_type) => old_lock_type.is_some(),
+            Err(LockSwapError::AlreadyLocked) => {
+                return Err(Status::failed_precondition("swap is locked"))
+            }
+            Err(e) => {
+                error!("failed to lock swap for refund: {:?}", e);
+                return Err(Status::internal("internal error"));
+            }
+        };
+
+        match self
+            .lightning_client
+            .has_pending_or_complete_payment(&swap.swap.public.hash)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => {
+                if !was_locked {
+                    let _ = self.swap_repository.unlock_swap(&swap.swap).await;
+                }
+
+                return Err(Status::failed_precondition("swap is locked"));
+            }
+            Err(e) => {
+                error!("failed to check for pending or complete payment: {:?}", e);
+                if !was_locked {
+                    let _ = self.swap_repository.unlock_swap(&swap.swap).await;
+                }
+
+                return Err(Status::internal("internal error"));
+            }
+        }
+
         Ok(Response::new(RefundSwapResponse {
             partial_signature: partial_signature.serialize().to_vec(),
             pub_nonce: our_pub_nonce.serialize().to_vec(),

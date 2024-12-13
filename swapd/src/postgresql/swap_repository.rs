@@ -17,9 +17,9 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, PaidOutpoint, PaymentAttempt,
-        Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
-        SwapStatePaidOutpoints,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, LockSwapError, LockType,
+        PaidOutpoint, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData,
+        SwapState, SwapStatePaidOutpoints,
     },
 };
 
@@ -356,6 +356,60 @@ impl crate::swap::SwapRepository for SwapRepository {
 
         Ok(result)
     }
+
+    async fn lock_swap(
+        &self,
+        swap: &Swap,
+        lock_type: LockType,
+    ) -> Result<Option<LockType>, LockSwapError> {
+        let mut tx = self.pool.begin().await?;
+        let extra_where = match lock_type {
+            LockType::Pay => "",
+            LockType::Refund => " OR locked = $2",
+        };
+        let query = format!("
+            UPDATE swaps x
+            SET    locked = $2
+            FROM  (SELECT payment_hash, locked FROM swaps WHERE payment_hash = $1 AND locked IS NULL{} FOR UPDATE) y 
+            WHERE  x.payment_hash = y.payment_hash
+            RETURNING y.locked AS old_locked", extra_where);
+
+        let lock_type: i32 = lock_type.into();
+        let maybe_row = sqlx::query(&query)
+            .bind(swap.public.hash.as_byte_array().to_vec())
+            .bind(lock_type)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+        let row = match maybe_row {
+            Some(row) => row,
+            None => return Err(LockSwapError::AlreadyLocked),
+        };
+
+        let old_lock_type: Option<i32> = row.try_get(0)?;
+        let old_lock_type: Option<LockType> = match old_lock_type {
+            Some(old_lock_type) => Some(old_lock_type.try_into()?),
+            None => None,
+        };
+        tx.commit().await?;
+        Ok(old_lock_type)
+    }
+
+    async fn unlock_swap(&self, swap: &Swap) -> Result<(), LockSwapError> {
+        let query = String::from(
+            "
+            UPDATE swaps 
+            SET locked = NULL 
+            WHERE payment_hash = $1",
+        );
+
+        sqlx::query(&query)
+            .bind(swap.public.hash.as_byte_array().to_vec())
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
 }
 
 fn swap_state_fields(prefix: &str) -> String {
@@ -438,6 +492,12 @@ impl From<sqlx::Error> for AddPaymentResultError {
 impl From<sqlx::Error> for GetPaidUtxosError {
     fn from(value: sqlx::Error) -> Self {
         GetPaidUtxosError::General(Box::new(value))
+    }
+}
+
+impl From<sqlx::Error> for LockSwapError {
+    fn from(value: sqlx::Error) -> Self {
+        LockSwapError::General(Box::new(value))
     }
 }
 

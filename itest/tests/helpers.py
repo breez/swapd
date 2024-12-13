@@ -26,6 +26,7 @@ __all__ = [
     "setup_user_and_swapper",
     "create_swap_no_invoice_extended",
     "create_swap_no_invoice",
+    "create_swap_extended",
     "create_swap",
     "whatthefee",
     "postgres_factory",
@@ -70,15 +71,22 @@ def create_swap_no_invoice_extended(user: ClnNode, swapper: SwapdServer):
 
 
 def create_swap_no_invoice(user: ClnNode, swapper: SwapdServer):
-    address, preimage, h, _, _ = create_swap_no_invoice_extended(user, swapper)
+    address, preimage, h, _, _, _ = create_swap_no_invoice_extended(user, swapper)
     return address, preimage, h
 
 
-def create_swap(user: ClnNode, swapper: SwapdServer, amount=100_000_000):
-    address, preimage, h = create_swap_no_invoice(user, swapper)
+def create_swap_extended(user: ClnNode, swapper: SwapdServer, amount=100_000_000):
+    address, preimage, h, refund_privkey, claim_pubkey, lock_height = (
+        create_swap_no_invoice_extended(user, swapper)
+    )
     payment_request = user.create_invoice(
         amount,
         description="test",
         preimage=preimage,
     )
+    return address, payment_request, h, refund_privkey, claim_pubkey, lock_height
+
+
+def create_swap(user: ClnNode, swapper: SwapdServer, amount=100_000_000):
+    address, payment_request, h, _, _, _ = create_swap_extended(user, swapper, amount)
     return address, payment_request, h

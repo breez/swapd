@@ -10,6 +10,7 @@ CREATE TABLE swaps (
     claim_script BYTEA NOT NULL,
     creation_time BIGINT NOT NULL,
     lock_height BIGINT NOT NULL,
+    locked INTEGER NULL,
     payment_hash BYTEA NOT NULL PRIMARY KEY,
     preimage BYTEA NULL,
     refund_pubkey BYTEA NOT NULL,

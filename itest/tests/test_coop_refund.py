@@ -1,4 +1,5 @@
 from helpers import *
+import grpc
 import musig2
 import os
 from bitcoinutils.transactions import Locktime
@@ -11,26 +12,27 @@ from bitcoinutils.transactions import Transaction, TxInput, TxOutput, TxWitnessI
 from decimal import Decimal
 
 
-def test_cooperative_refund(node_factory, swapd_factory):
-    setup("regtest")
-    user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, payment_request, h, refund_privkey, claim_pubkey, lock_height = (
-        create_swap_no_invoice_extended(user, swapper)
-    )
-    to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
-    user.bitcoin.generate_block(1)
+def coop_refund(
+    user,
+    swapper,
+    address,
+    h,
+    refund_privkey,
+    claim_pubkey,
+    lock_height,
+    to_spend_txid,
+    refund_amount,
+):
     to_spend_tx = user.bitcoin.rpc.getrawtransaction(to_spend_txid, True)
     to_spend_output_index = 0
     if to_spend_tx["vout"][1]["value"] == Decimal("0.00100000"):
         to_spend_output_index = 1
 
-    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
-
     refund_address = P2trAddress(user.new_address())
     extra_in = os.urandom(32)
 
-    tx_in = TxInput(to_spend_txid, to_spend_output_index)
-    tx_out = TxOutput(99_000, refund_address.to_script_pub_key())
+    tx_in = TxInput(to_spend_txid, to_spend_output_index, sequence="00000001")
+    tx_out = TxOutput(refund_amount, refund_address.to_script_pub_key())
     tx = Transaction([tx_in], [tx_out], has_segwit=True, witnesses=[TxWitnessInput([])])
     tx_digest = tx.get_transaction_taproot_digest(
         0, [P2trAddress(address).to_script_pub_key()], [100_000]
@@ -81,8 +83,132 @@ def test_cooperative_refund(node_factory, swapd_factory):
 
     sig_agg = musig2.partial_sig_agg([their_partial_sig, our_partial_sig], session)
     tx.witnesses[0].stack.append(sig_agg.hex())
+    return tx.to_hex()
+
+
+def test_cooperative_refund_success(node_factory, swapd_factory):
+    setup("regtest")
+    user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
+    address, _, h, refund_privkey, claim_pubkey, lock_height = (
+        create_swap_no_invoice_extended(user, swapper)
+    )
+    to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
+    user.bitcoin.generate_block(1)
+
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
+
+    tx = coop_refund(
+        user,
+        swapper,
+        address,
+        h,
+        refund_privkey,
+        claim_pubkey,
+        lock_height,
+        to_spend_txid,
+        99_000,
+    )
 
     expected_utxos = len(user.list_utxos()) + 1
-    user.bitcoin.rpc.sendrawtransaction(tx.to_hex())
+    user.bitcoin.rpc.sendrawtransaction(tx)
     user.bitcoin.generate_block(1)
     wait_for(lambda: len(user.list_utxos()) == expected_utxos)
+
+
+def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
+    setup("regtest")
+    user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
+    address, _, h, refund_privkey, claim_pubkey, lock_height = (
+        create_swap_no_invoice_extended(user, swapper)
+    )
+    to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
+    user.bitcoin.generate_block(1)
+
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
+
+    expected_utxos = len(user.list_utxos()) + 1
+    tx = coop_refund(
+        user,
+        swapper,
+        address,
+        h,
+        refund_privkey,
+        claim_pubkey,
+        lock_height,
+        to_spend_txid,
+        99_000,
+    )
+    user.bitcoin.rpc.sendrawtransaction(tx)
+    tx = coop_refund(
+        user,
+        swapper,
+        address,
+        h,
+        refund_privkey,
+        claim_pubkey,
+        lock_height,
+        to_spend_txid,
+        98_000,
+    )
+    user.bitcoin.rpc.sendrawtransaction(tx)
+    user.bitcoin.generate_block(1)
+    wait_for(lambda: len(user.list_utxos()) == expected_utxos)
+
+
+def test_cooperative_refund_then_pay_failure(node_factory, swapd_factory):
+    setup("regtest")
+    user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
+    address, payment_request, h, refund_privkey, claim_pubkey, lock_height = (
+        create_swap_extended(user, swapper)
+    )
+    to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
+    user.bitcoin.generate_block(1)
+
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
+
+    coop_refund(
+        user,
+        swapper,
+        address,
+        h,
+        refund_privkey,
+        claim_pubkey,
+        lock_height,
+        to_spend_txid,
+        99_000,
+    )
+    try:
+        swapper.rpc.pay_swap(payment_request)
+        assert False
+    except grpc._channel._InactiveRpcError as e:
+        assert e.details() == "swap is locked"
+
+
+def test_pay_then_cooperative_refund_failure(node_factory, swapd_factory):
+    setup("regtest")
+    user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
+    address, payment_request, h, refund_privkey, claim_pubkey, lock_height = (
+        create_swap_extended(user, swapper)
+    )
+    to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
+    user.bitcoin.generate_block(1)
+
+    wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
+
+    swapper.rpc.pay_swap(payment_request)
+
+    try:
+        coop_refund(
+            user,
+            swapper,
+            address,
+            h,
+            refund_privkey,
+            claim_pubkey,
+            lock_height,
+            to_spend_txid,
+            99_000,
+        )
+        assert False
+    except grpc._channel._InactiveRpcError as e:
+        assert e.details() == "swap is locked"
