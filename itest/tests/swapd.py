@@ -64,6 +64,7 @@ class SwapD(TailableProc):
         self.prefix = "swapd-%d" % (swapd_id)
         self.process_dir = process_dir
         self.opts = SWAPD_CONFIG.copy()
+        self.logger = logging.getLogger("SwapD")
 
         opts = {
             "address": "127.0.0.1:{}".format(grpc_port),
@@ -101,10 +102,11 @@ class SwapD(TailableProc):
         self.opts["bitcoind-rpc-address"] = "http://127.0.0.1:{}".format(
             self.bitcoindproxy.rpcport
         )
+        self.logger.debug("starting swapd with commandline", self.cmd_line)
         TailableProc.start(self, stdin, stdout_redir=True, stderr_redir=stderr_redir)
         if wait_for_initialized:
             self.wait_for_log("swapd started")
-        logging.info("SwapD started")
+        self.logger.info("SwapD started")
 
     def wait(self, timeout=TIMEOUT):
         """Wait for the daemon to stop for up to timeout seconds
@@ -454,6 +456,7 @@ class WhatTheFee(object):
         self.port = port
         self.request_count = 0
         self.quotient = 1
+        self.logger = logging.getLogger("WhatTheFee")
 
     def get_fees(self):
         self.request_count += 1
@@ -496,12 +499,12 @@ class WhatTheFee(object):
         while self.server.bind_addr[1] == 0:
             pass
         self.port = self.server.bind_addr[1]
-        logging.debug("WhatTheFee api listening on port {}".format(self.port))
+        self.logger.debug("WhatTheFee api listening on port {}".format(self.port))
 
     def stop(self):
         self.server.stop()
         self.proxy_thread.join()
-        logging.debug(
+        self.logger.debug(
             "WhatTheFee api shut down after processing {} requests".format(
                 self.request_count
             )
