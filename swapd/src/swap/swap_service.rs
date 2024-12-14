@@ -288,6 +288,10 @@ where
         Ok(tx)
     }
 
+    pub fn lock_time(&self) -> u32 {
+        self.lock_time
+    }
+
     pub fn partial_sign_refund_tx(
         &self,
         swap: &Swap,
