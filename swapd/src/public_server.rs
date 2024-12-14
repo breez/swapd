@@ -200,7 +200,6 @@ where
         &self,
         request: Request<PaySwapRequest>,
     ) -> Result<Response<PaySwapResponse>, Status> {
-        // TODO: Ensure swap is not refunded and cannot be refunded at the same time.
         debug!("pay_swap request");
         let req = request.into_inner();
         let invoice: Bolt11Invoice = req.payment_request.parse().map_err(|e| {
@@ -226,14 +225,26 @@ where
             ));
         }
 
-        if amount_sat > self.max_swap_amount_sat {
+        let parameters = self.get_swap_parameters().await?;
+        if amount_sat > parameters.max_swap_amount_sat {
             trace!(
                 amount_sat,
-                max_swap_amount_sat = self.max_swap_amount_sat,
+                max_swap_amount_sat = parameters.max_swap_amount_sat,
                 "invoice amount exceeds max swap amount"
             );
             return Err(Status::invalid_argument(
-                "amount exceeds maximum allowed deposit",
+                "amount exceeds max swap amount",
+            ));
+        }
+
+        if amount_sat < parameters.min_swap_amount_sat {
+            trace!(
+                amount_sat,
+                min_swap_amount_sat = parameters.min_swap_amount_sat,
+                "invoice amount is below min swap amount"
+            );
+            return Err(Status::invalid_argument(
+                "amount is below min swap amount",
             ));
         }
 
@@ -290,6 +301,16 @@ where
                         confirmations,
                         min_confirmations = self.min_confirmations,
                         "utxo has less than min confirmations"
+                    );
+                    return false;
+                }
+
+                if utxo.tx_out.value.to_sat() < parameters.min_utxo_amount_sat {
+                    debug!(
+                        outpoint = field::display(utxo.outpoint),
+                        utxo_amount_sat = utxo.tx_out.value.to_sat(),
+                        min_utxo_amount_sat = parameters.min_utxo_amount_sat,
+                        "utxo value is below min_utxo_amount_sat"
                     );
                     return false;
                 }
