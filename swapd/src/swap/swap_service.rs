@@ -20,8 +20,7 @@ use secp256k1::musig::{
 use thiserror::Error;
 use tracing::{error, instrument, trace};
 
-// TODO: fix for taproot
-const CLAIM_INPUT_WITNESS_SIZE: usize = 1 + 1 + 73 + 1 + 32 + 1 + 100;
+const CLAIM_INPUT_WITNESS_SIZE: usize = 222;
 
 #[derive(Clone, Debug)]
 pub struct ClaimableUtxo {
