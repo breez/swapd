@@ -55,6 +55,12 @@ class SwapperStub(object):
             response_deserializer=swap__pb2.RefundSwapResponse.FromString,
             _registered_method=True,
         )
+        self.SwapParameters = channel.unary_unary(
+            "/swap.Swapper/SwapParameters",
+            request_serializer=swap__pb2.SwapParametersRequest.SerializeToString,
+            response_deserializer=swap__pb2.SwapParametersResponse.FromString,
+            _registered_method=True,
+        )
 
 
 class SwapperServicer(object):
@@ -78,6 +84,12 @@ class SwapperServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def SwapParameters(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_SwapperServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -95,6 +107,11 @@ def add_SwapperServicer_to_server(servicer, server):
             servicer.RefundSwap,
             request_deserializer=swap__pb2.RefundSwapRequest.FromString,
             response_serializer=swap__pb2.RefundSwapResponse.SerializeToString,
+        ),
+        "SwapParameters": grpc.unary_unary_rpc_method_handler(
+            servicer.SwapParameters,
+            request_deserializer=swap__pb2.SwapParametersRequest.FromString,
+            response_serializer=swap__pb2.SwapParametersResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -187,6 +204,36 @@ class Swapper(object):
             "/swap.Swapper/RefundSwap",
             swap__pb2.RefundSwapRequest.SerializeToString,
             swap__pb2.RefundSwapResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def SwapParameters(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/swap.Swapper/SwapParameters",
+            swap__pb2.SwapParametersRequest.SerializeToString,
+            swap__pb2.SwapParametersResponse.FromString,
             options,
             channel_credentials,
             insecure,
