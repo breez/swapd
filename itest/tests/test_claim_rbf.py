@@ -30,7 +30,7 @@ def test_claim_rbf_close_to_deadline(node_factory, swapd_factory, lock_time):
     claim_txid1 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
     claim_raw1 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid1, True)
     assert claim_raw1["vin"][0]["txid"] == txid
-    assert claim_raw1["vout"][0]["value"] == Decimal("0.00099755")
+    assert claim_raw1["vout"][0]["value"] == Decimal("0.00099586")
 
     # Set the effective fee rate of the mempool tx to 0, so it won't be mined
     swapper.lightning_node.bitcoin.rpc.prioritisetransaction(
@@ -49,7 +49,7 @@ def test_claim_rbf_close_to_deadline(node_factory, swapd_factory, lock_time):
     claim_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
     claim_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid2, True)
     assert claim_raw2["vin"][0]["txid"] == txid
-    assert claim_raw2["vout"][0]["value"] == Decimal("0.00099635")
+    assert claim_raw2["vout"][0]["value"] == Decimal("0.00099312")
 
     swapper.lightning_node.bitcoin.generate_block(1)
 
@@ -76,7 +76,7 @@ def test_claim_rbf_new_feerate(node_factory, swapd_factory):
     claim_txid1 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
     claim_raw1 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid1, True)
     assert claim_raw1["vin"][0]["txid"] == txid
-    assert claim_raw1["vout"][0]["value"] == Decimal("0.00099755")
+    assert claim_raw1["vout"][0]["value"] == Decimal("0.00099586")
     # Set the effective fee rate of the mempool tx to 0, so it won't be mined
     swapper.lightning_node.bitcoin.rpc.prioritisetransaction(
         claim_txid1, None, -1000000
@@ -103,7 +103,7 @@ def test_claim_rbf_new_feerate(node_factory, swapd_factory):
     claim_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]
     claim_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(claim_txid2, True)
     assert claim_raw2["vin"][0]["txid"] == txid
-    assert claim_raw2["vout"][0]["value"] == Decimal("0.00097303")
+    assert claim_raw2["vout"][0]["value"] == Decimal("0.00097933")
 
     swapper.lightning_node.bitcoin.generate_block(1)
     wait_for(lambda: len(swapper.lightning_node.list_utxos()) == expected_outputs)

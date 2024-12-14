@@ -22,6 +22,7 @@ import swap_pb2
 import multiprocessing
 import grpc
 import logging
+import math
 import os
 import threading
 
@@ -52,7 +53,7 @@ class SwapD(TailableProc):
         grpc_port=27103,
         internal_grpc_port=27104,
         swapd_id=0,
-        fees=[20, 40, 60, 80, 100],
+        fees=[1, 2, 3, 4, 5],
     ):
         # We handle our own version of verbose, below.
         TailableProc.__init__(self, process_dir, verbose=True)
@@ -133,7 +134,7 @@ class SwapdServer(object):
         grpc_port=None,
         internal_grpc_port=None,
         options=None,
-        fees=[20, 40, 60, 80, 100],
+        fees=[1, 2, 3, 4, 5],
     ):
         self.bitcoind = bitcoind
         self.lightning_node = lightning_node
@@ -376,7 +377,7 @@ class SwapdFactory(object):
     def get_swapd(
         self,
         options=None,
-        fees=[20, 40, 60, 80, 100],
+        fees=[1, 2, 3, 4, 5],
         start=True,
         expect_fail=False,
         **kwargs,
@@ -474,7 +475,7 @@ class WhatTheFee(object):
         # multiply the caller fees by the quotient.
         fees = ",".join(
             map(
-                lambda x: str(int(x) * self.quotient),
+                lambda x: str(round(math.log(int(x) * self.quotient) * 100)),
                 request.args.get("fees").split(","),
             )
         )
