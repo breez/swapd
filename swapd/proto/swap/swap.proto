@@ -5,6 +5,7 @@ service Swapper {
     rpc CreateSwap (CreateSwapRequest) returns (CreateSwapResponse) {}
     rpc PaySwap (PaySwapRequest) returns (PaySwapResponse) {}
     rpc RefundSwap (RefundSwapRequest) returns (RefundSwapResponse) {}
+    rpc SwapParameters (SwapParametersRequest) returns (SwapParametersResponse) {}
 }
 
 message CreateSwapRequest {
@@ -16,6 +17,7 @@ message CreateSwapResponse {
     string address = 1;
     bytes claim_pubkey = 2;
     uint32 lock_height = 3;
+    SwapParameters parameters = 4;
 }
 
 message PaySwapRequest {
@@ -34,4 +36,17 @@ message RefundSwapRequest {
 message RefundSwapResponse {
     bytes pub_nonce = 1;
     bytes partial_signature = 2;
+}
+
+message SwapParameters {
+    uint32 lock_time = 1;
+    uint64 max_swap_amount_sat = 2;
+    uint64 min_swap_amount_sat = 3;
+    uint64 min_utxo_amount_sat = 4;
+}
+
+message SwapParametersRequest {}
+
+message SwapParametersResponse {
+    SwapParameters parameters = 1;
 }

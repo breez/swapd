@@ -31,7 +31,8 @@ use crate::swap::{
 };
 use swap_api::{
     swapper_server::Swapper, CreateSwapRequest, CreateSwapResponse, PaySwapRequest,
-    PaySwapResponse, RefundSwapRequest, RefundSwapResponse,
+    PaySwapResponse, RefundSwapRequest, RefundSwapResponse, SwapParameters, SwapParametersRequest,
+    SwapParametersResponse,
 };
 
 pub mod swap_api {
@@ -129,6 +130,10 @@ where
             fee_estimator: params.fee_estimator,
         }
     }
+
+    async fn get_swap_parameters(&self) -> Result<SwapParameters, Status> {
+        todo!();
+    }
 }
 #[tonic::async_trait]
 impl<C, CF, CR, L, P, R, RP, F> Swapper for SwapServer<C, CF, CR, L, P, R, RP, F>
@@ -181,11 +186,12 @@ where
             "new swap created"
         );
 
-        // TODO: Add min/max allowed here?
+        let parameters = self.get_swap_parameters().await?;
         Ok(Response::new(CreateSwapResponse {
             address: swap.public.address.to_string(),
             claim_pubkey: swap.public.claim_pubkey.serialize().to_vec(),
             lock_height: swap.public.lock_height,
+            parameters: Some(parameters),
         }))
     }
 
@@ -582,6 +588,16 @@ where
         Ok(Response::new(RefundSwapResponse {
             partial_signature: partial_signature.serialize().to_vec(),
             pub_nonce: our_pub_nonce.serialize().to_vec(),
+        }))
+    }
+
+    async fn swap_parameters(
+        &self,
+        _request: Request<SwapParametersRequest>,
+    ) -> Result<Response<SwapParametersResponse>, Status> {
+        let parameters = self.get_swap_parameters().await?;
+        Ok(Response::new(SwapParametersResponse {
+            parameters: Some(parameters),
         }))
     }
 }
