@@ -515,7 +515,6 @@ where
             return Err(Status::invalid_argument("invalid transaction input"));
         }
 
-        // TODO: Should not have any payout pending.
         let (partial_signature, our_pub_nonce) = self
             .swap_service
             .partial_sign_refund_tx(&swap.swap, tx, prevouts, input_index, their_pub_nonce)
