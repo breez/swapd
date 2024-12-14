@@ -40,6 +40,7 @@ pub mod swap_api {
 }
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];
+const MIN_SWAP_AMOUNT_CONF_TARGET: i32 = 12;
 pub struct SwapServerParams<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient,
@@ -132,7 +133,19 @@ where
     }
 
     async fn get_swap_parameters(&self) -> Result<SwapParameters, Status> {
-        todo!();
+        let fee_estimate = self
+            .fee_estimator
+            .estimate_fee(MIN_SWAP_AMOUNT_CONF_TARGET)
+            .await?;
+        // Assume a transaction weight of 1000.
+        let min_utxo_amount_sat = (fee_estimate.sat_per_kw as u64) * 3 / 2;
+
+        Ok(SwapParameters {
+            lock_time: self.swap_service.lock_time(),
+            max_swap_amount_sat: self.max_swap_amount_sat,
+            min_swap_amount_sat: min_utxo_amount_sat,
+            min_utxo_amount_sat,
+        })
     }
 }
 #[tonic::async_trait]
@@ -232,9 +245,7 @@ where
                 max_swap_amount_sat = parameters.max_swap_amount_sat,
                 "invoice amount exceeds max swap amount"
             );
-            return Err(Status::invalid_argument(
-                "amount exceeds max swap amount",
-            ));
+            return Err(Status::invalid_argument("amount exceeds max swap amount"));
         }
 
         if amount_sat < parameters.min_swap_amount_sat {
@@ -243,9 +254,7 @@ where
                 min_swap_amount_sat = parameters.min_swap_amount_sat,
                 "invoice amount is below min swap amount"
             );
-            return Err(Status::invalid_argument(
-                "amount is below min swap amount",
-            ));
+            return Err(Status::invalid_argument("amount is below min swap amount"));
         }
 
         let hash = invoice.payment_hash();
