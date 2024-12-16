@@ -31,7 +31,8 @@ use crate::swap::{
 };
 use swap_api::{
     swapper_server::Swapper, CreateSwapRequest, CreateSwapResponse, PaySwapRequest,
-    PaySwapResponse, RefundSwapRequest, RefundSwapResponse,
+    PaySwapResponse, RefundSwapRequest, RefundSwapResponse, SwapParameters, SwapParametersRequest,
+    SwapParametersResponse,
 };
 
 pub mod swap_api {
@@ -39,6 +40,8 @@ pub mod swap_api {
 }
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];
+const MIN_SWAP_AMOUNT_CONF_TARGET: i32 = 12;
+
 pub struct SwapServerParams<C, CF, CR, L, P, R, F>
 where
     C: ChainClient,
@@ -123,6 +126,22 @@ where
             fee_estimator: params.fee_estimator,
         }
     }
+
+    async fn get_swap_parameters(&self) -> Result<SwapParameters, Status> {
+        let fee_estimate = self
+            .fee_estimator
+            .estimate_fee(MIN_SWAP_AMOUNT_CONF_TARGET)
+            .await?;
+        // Assume a transaction weight of 1000.
+        let min_utxo_amount_sat = (fee_estimate.sat_per_kw as u64) * 3 / 2;
+
+        Ok(SwapParameters {
+            lock_time: self.swap_service.lock_time(),
+            max_swap_amount_sat: self.max_swap_amount_sat,
+            min_swap_amount_sat: min_utxo_amount_sat,
+            min_utxo_amount_sat,
+        })
+    }
 }
 #[tonic::async_trait]
 impl<C, CF, CR, L, P, R, F> Swapper for SwapServer<C, CF, CR, L, P, R, F>
@@ -172,11 +191,12 @@ where
             "new swap created"
         );
 
-        // TODO: Add min/max allowed here?
+        let parameters = self.get_swap_parameters().await?;
         Ok(Response::new(CreateSwapResponse {
             address: swap.public.address.to_string(),
             claim_pubkey: swap.public.claim_pubkey.serialize().to_vec(),
             lock_height: swap.public.lock_height,
+            parameters: Some(parameters),
         }))
     }
 
@@ -185,7 +205,6 @@ where
         &self,
         request: Request<PaySwapRequest>,
     ) -> Result<Response<PaySwapResponse>, Status> {
-        // TODO: Ensure swap is not refunded and cannot be refunded at the same time.
         debug!("pay_swap request");
         let req = request.into_inner();
         let invoice: Bolt11Invoice = req.payment_request.parse().map_err(|e| {
@@ -211,15 +230,23 @@ where
             ));
         }
 
-        if amount_sat > self.max_swap_amount_sat {
+        let parameters = self.get_swap_parameters().await?;
+        if amount_sat > parameters.max_swap_amount_sat {
             trace!(
                 amount_sat,
-                max_swap_amount_sat = self.max_swap_amount_sat,
+                max_swap_amount_sat = parameters.max_swap_amount_sat,
                 "invoice amount exceeds max swap amount"
             );
-            return Err(Status::invalid_argument(
-                "amount exceeds maximum allowed deposit",
-            ));
+            return Err(Status::invalid_argument("amount exceeds max swap amount"));
+        }
+
+        if amount_sat < parameters.min_swap_amount_sat {
+            trace!(
+                amount_sat,
+                min_swap_amount_sat = parameters.min_swap_amount_sat,
+                "invoice amount is below min swap amount"
+            );
+            return Err(Status::invalid_argument("amount is below min swap amount"));
         }
 
         let hash = invoice.payment_hash();
@@ -275,6 +302,16 @@ where
                         confirmations,
                         min_confirmations = self.min_confirmations,
                         "utxo has less than min confirmations"
+                    );
+                    return false;
+                }
+
+                if utxo.tx_out.value.to_sat() < parameters.min_utxo_amount_sat {
+                    debug!(
+                        outpoint = field::display(utxo.outpoint),
+                        utxo_amount_sat = utxo.tx_out.value.to_sat(),
+                        min_utxo_amount_sat = parameters.min_utxo_amount_sat,
+                        "utxo value is below min_utxo_amount_sat"
                     );
                     return false;
                 }
@@ -568,6 +605,16 @@ where
         Ok(Response::new(RefundSwapResponse {
             partial_signature: partial_signature.serialize().to_vec(),
             pub_nonce: our_pub_nonce.serialize().to_vec(),
+        }))
+    }
+
+    async fn swap_parameters(
+        &self,
+        _request: Request<SwapParametersRequest>,
+    ) -> Result<Response<SwapParametersResponse>, Status> {
+        let parameters = self.get_swap_parameters().await?;
+        Ok(Response::new(SwapParametersResponse {
+            parameters: Some(parameters),
         }))
     }
 }
