@@ -14,8 +14,8 @@ use bitcoin::{
     TapSighashType, Transaction, TxIn, TxOut, Weight, Witness, XOnlyPublicKey,
 };
 use secp256k1::musig::{
-    MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSession,
-    MusigSessionId,
+    MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSecRand,
+    MusigSession,
 };
 use thiserror::Error;
 use tracing::{error, instrument, trace};
@@ -307,7 +307,7 @@ where
 
         let mut key_agg_cache = self.key_agg_cache(swap)?;
         let _ = key_agg_cache.pubkey_xonly_tweak_add(&self.musig_secp, &tweak_scalar)?;
-        let session_id = MusigSessionId::assume_unique_per_nonce_gen(
+        let session_id = MusigSecRand::assume_unique_per_nonce_gen(
             self.privkey_provider.new_private_key()?.secret_bytes(),
         );
 
