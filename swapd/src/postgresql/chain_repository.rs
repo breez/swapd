@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use bitcoin::{address::NetworkUnchecked, Address, BlockHash, Network, OutPoint};
+use bitcoin::{address::NetworkUnchecked, Address, Amount, BlockHash, Network, OutPoint, TxOut};
 use futures::TryStreamExt;
 use sqlx::{PgConnection, PgPool, Row};
 use tracing::instrument;
@@ -35,7 +35,7 @@ impl ChainRepository {
         let addresses: Vec<_> = tx_outputs.iter().map(|u| u.address.to_string()).collect();
         let amounts: Vec<_> = tx_outputs
             .iter()
-            .map(|u| u.utxo.amount_sat as i64)
+            .map(|u| u.utxo.tx_out.value.to_sat() as i64)
             .collect();
         sqlx::query(
             r#"INSERT INTO tx_outputs (
@@ -298,16 +298,19 @@ impl chain::ChainRepository for ChainRepository {
             let amount: i64 = row.try_get("amount")?;
             let block_hash: String = row.try_get("block_hash")?;
             let height: i64 = row.try_get("height")?;
+            let address = address
+                .parse::<Address<NetworkUnchecked>>()?
+                .require_network(self.network)?;
             let utxo = Utxo {
                 block_hash: block_hash.parse()?,
                 block_height: height as u64,
                 outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
-                amount_sat: amount as u64,
+                tx_out: TxOut {
+                    value: Amount::from_sat(amount as u64),
+                    script_pubkey: address.script_pubkey(),
+                },
             };
 
-            let address = address
-                .parse::<Address<NetworkUnchecked>>()?
-                .require_network(self.network)?;
             result.push(AddressUtxo { address, utxo });
         }
         Ok(result)
@@ -350,63 +353,13 @@ impl chain::ChainRepository for ChainRepository {
                 block_hash: block_hash.parse()?,
                 block_height: height as u64,
                 outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
-                amount_sat: amount as u64,
+                tx_out: TxOut {
+                    value: Amount::from_sat(amount as u64),
+                    script_pubkey: address.script_pubkey(),
+                },
             };
             result.push(utxo);
         }
-        Ok(result)
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    async fn get_utxos_for_addresses(
-        &self,
-        addresses: &[Address],
-    ) -> Result<HashMap<Address, Vec<Utxo>>, ChainRepositoryError> {
-        let addresses: Vec<_> = addresses.iter().map(|a| a.to_string()).collect();
-        let mut rows = sqlx::query(
-            r#"SELECT o.address
-            ,         o.tx_id
-            ,         o.output_index
-            ,         o.amount
-            ,         b.block_hash
-            ,         b.height
-            FROM tx_outputs o
-            INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
-            INNER JOIN blocks b ON tb.block_hash = b.block_hash
-            WHERE address = ANY($1) AND NOT EXISTS (SELECT 1 
-                FROM tx_inputs i
-                INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
-                INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
-                WHERE o.tx_id = i.tx_id 
-                    AND o.output_index = i.output_index)
-            ORDER BY o.address, b.height, o.tx_id, o.output_index"#,
-        )
-        .bind(&addresses)
-        .fetch(&*self.pool);
-
-        let mut result: HashMap<Address, Vec<Utxo>> = HashMap::new();
-        while let Some(row) = rows.try_next().await? {
-            let address: String = row.try_get("address")?;
-            let tx_id: String = row.try_get("tx_id")?;
-            let output_index: i64 = row.try_get("output_index")?;
-            let amount: i64 = row.try_get("amount")?;
-            let block_hash: String = row.try_get("block_hash")?;
-            let height: i64 = row.try_get("height")?;
-            let utxo = Utxo {
-                block_hash: block_hash.parse()?,
-                block_height: height as u64,
-                outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
-                amount_sat: amount as u64,
-            };
-
-            let address = address
-                .parse::<Address<NetworkUnchecked>>()?
-                .require_network(self.network)?;
-
-            let entry = result.entry(address).or_insert(Vec::new());
-            entry.push(utxo);
-        }
-
         Ok(result)
     }
 

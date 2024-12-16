@@ -1,4 +1,4 @@
-use bitcoin::{Address, Block, BlockHash, OutPoint, Transaction};
+use bitcoin::{Address, Block, BlockHash, OutPoint, Transaction, Txid};
 use thiserror::Error;
 
 use super::ChainRepositoryError;
@@ -38,4 +38,5 @@ pub trait ChainClient {
         hash: &BlockHash,
     ) -> Result<super::types::BlockHeader, ChainError>;
     async fn get_sender_addresses(&self, utxos: &[OutPoint]) -> Result<Vec<Address>, ChainError>;
+    async fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, ChainError>;
 }

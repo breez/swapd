@@ -43,6 +43,9 @@ class ClnNode:
             p["id"] for p in self.node.rpc.listpeers()["peers"]
         ]
 
+    def new_address(self):
+        return self.node.rpc.newaddr("p2tr")["p2tr"]
+
     def fund_wallet(self, amount):
         return self.node.fundwallet(10 * amount)
 
@@ -78,11 +81,13 @@ class ClnNode:
 
         return {"txid": res["txid"], "outnum": res["outnum"]}
 
-    def create_invoice(self, amount_msat, description="desc", preimage=None):
+    def create_invoice(self, amount_msat, description="desc", preimage=None, cltv=None):
         label = "".join(
             random.choice(string.ascii_letters + string.digits) for _ in range(20)
         )
-        inv = self.node.rpc.invoice(amount_msat, label, description, preimage=preimage)
+        inv = self.node.rpc.invoice(
+            amount_msat, label, description, preimage=preimage, cltv=cltv
+        )
         return inv["bolt11"]
 
     def send_onchain(self, address, amount, confirm=0):
@@ -119,16 +124,21 @@ class ClnNode:
 class ClnNodeFactory(object):
     """A factory to setup and start wrapped `lightningd` daemons."""
 
-    def __init__(self, bitcoind, directory):
+    def __init__(self, bitcoind, directory, cltv_delta):
         self.next_id = 1
         self.nodes = []
         self.reserved_ports = []
         self.bitcoind = bitcoind
         self.directory = directory
         self.lock = threading.Lock()
+        self.cltv_delta = cltv_delta
 
     def get_node(
-        self, node_id=None, start=True, cleandir=True, wait_for_bitcoind_sync=True
+        self,
+        node_id=None,
+        start=True,
+        cleandir=True,
+        wait_for_bitcoind_sync=True,
     ):
         node_id = self.get_node_id() if not node_id else node_id
         port = reserve_unused_port()
@@ -155,6 +165,8 @@ class ClnNodeFactory(object):
             feerates=(15000, 11000, 7500, 3750),
         )
 
+        node.daemon.opts["cltv-delta"] = self.cltv_delta
+
         cln_node = ClnNode(node, self.bitcoind, port, grpc_port)
         if start:
             try:
@@ -163,6 +175,7 @@ class ClnNodeFactory(object):
                 node.daemon.stop()
                 raise
 
+        self.nodes.append(cln_node)
         return cln_node
 
     def killall(self):

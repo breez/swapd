@@ -1,8 +1,9 @@
 
-DROP INDEX redeem_inputs_redeem_tx_id_idx;
-DROP TABLE redeem_inputs;
-DROP INDEX redeems_swap_hash_creation_time;
-DROP TABLE redeems;
+DROP TABLE lnd_payments;
+DROP INDEX claim_inputs_claim_tx_id_idx;
+DROP TABLE claim_inputs;
+DROP INDEX claims_swap_hash_creation_time;
+DROP TABLE claims;
 DROP TABLE filter_addresses;
 DROP INDEX tx_inputs_tx_id_output_index_idx;
 DROP TABLE tx_inputs;

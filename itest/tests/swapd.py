@@ -22,6 +22,7 @@ import swap_pb2
 import multiprocessing
 import grpc
 import logging
+import math
 import os
 import threading
 
@@ -29,13 +30,13 @@ SWAPD_CONFIG = OrderedDict(
     {
         "log-level": "swapd=trace,sqlx::query=debug,reqwest=debug,info",
         "chain-poll-interval-seconds": "1",
-        "redeem-poll-interval-seconds": "1",
+        "claim-poll-interval-seconds": "1",
         "preimage-poll-interval-seconds": "1",
         "whatthefee-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
         "lock-time": "288",
         "min-confirmations": "1",
-        "min-redeem-blocks": "72",
+        "min-claim-blocks": "72",
         "dust-limit-sat": "546",
     }
 )
@@ -52,7 +53,7 @@ class SwapD(TailableProc):
         grpc_port=27103,
         internal_grpc_port=27104,
         swapd_id=0,
-        fees=[20, 40, 60, 80, 100],
+        fees=[1, 2, 3, 4, 5],
     ):
         # We handle our own version of verbose, below.
         TailableProc.__init__(self, process_dir, verbose=True)
@@ -64,6 +65,7 @@ class SwapD(TailableProc):
         self.prefix = "swapd-%d" % (swapd_id)
         self.process_dir = process_dir
         self.opts = SWAPD_CONFIG.copy()
+        self.logger = logging.getLogger("SwapD")
 
         opts = {
             "address": "127.0.0.1:{}".format(grpc_port),
@@ -101,10 +103,13 @@ class SwapD(TailableProc):
         self.opts["bitcoind-rpc-address"] = "http://127.0.0.1:{}".format(
             self.bitcoindproxy.rpcport
         )
+        self.logger.debug(
+            "starting swapd with commandline: '{}'".format(" ".join(self.cmd_line))
+        )
         TailableProc.start(self, stdin, stdout_redir=True, stderr_redir=stderr_redir)
         if wait_for_initialized:
             self.wait_for_log("swapd started")
-        logging.info("SwapD started")
+        self.logger.info("SwapD started")
 
     def wait(self, timeout=TIMEOUT):
         """Wait for the daemon to stop for up to timeout seconds
@@ -129,7 +134,7 @@ class SwapdServer(object):
         grpc_port=None,
         internal_grpc_port=None,
         options=None,
-        fees=[20, 40, 60, 80, 100],
+        fees=[1, 2, 3, 4, 5],
     ):
         self.bitcoind = bitcoind
         self.lightning_node = lightning_node
@@ -209,6 +214,8 @@ class SwapdServer(object):
         self.daemon.start(stderr_redir=stderr_redir)
         if wait_for_bitcoind_sync:
             wait_for(self.is_synced)
+            self.logger.debug("swapd is synced")
+        self.logger.debug("swapd is started")
 
     def is_synced(self):
         height = self.bitcoind.rpc.getblockchaininfo()["blocks"]
@@ -276,14 +283,25 @@ class SwapperGrpc(object):
         self.channel = grpc.insecure_channel(f"{host}:{port}")
         self.stub = SwapperStub(self.channel)
 
-    def add_fund_init(self, lightning_node, pubkey, hash):
+    def create_swap(self, lightning_node, refund_pubkey, hash):
         node_id = lightning_node.info["id"]
-        payload = swap_pb2.AddFundInitRequest(nodeID=node_id, pubkey=pubkey, hash=hash)
-        return self.stub.AddFundInit(payload)
+        payload = swap_pb2.CreateSwapRequest(
+            hash=hash, refund_pubkey=bytes.fromhex(refund_pubkey)
+        )
+        return self.stub.CreateSwap(payload)
 
-    def get_swap_payment(self, payment_request):
-        payload = swap_pb2.GetSwapPaymentRequest(paymentRequest=payment_request)
-        return self.stub.GetSwapPayment(payload)
+    def pay_swap(self, payment_request):
+        payload = swap_pb2.PaySwapRequest(payment_request=payment_request)
+        return self.stub.PaySwap(payload)
+
+    def refund_swap(self, address, transaction, input_index, pub_nonce):
+        payload = swap_pb2.RefundSwapRequest(
+            address=address,
+            transaction=transaction,
+            input_index=input_index,
+            pub_nonce=pub_nonce,
+        )
+        return self.stub.RefundSwap(payload)
 
 
 class SwapManagerGrpc(object):
@@ -329,6 +347,9 @@ class SwapdFactory(object):
         postgres_factory,
         node_factory,
         options_provider,
+        lock_time,
+        min_claim_blocks,
+        min_viable_cltv,
     ):
 
         self.testname = testname
@@ -342,6 +363,9 @@ class SwapdFactory(object):
         self.postgres_factory = postgres_factory
         self.node_factory = node_factory
         self.options_provider = options_provider
+        self.lock_time = lock_time
+        self.min_claim_blocks = min_claim_blocks
+        self.min_viable_cltv = min_viable_cltv
 
     def get_swapd_id(self):
         """Generate a unique numeric ID for a swapd instance"""
@@ -353,7 +377,7 @@ class SwapdFactory(object):
     def get_swapd(
         self,
         options=None,
-        fees=[20, 40, 60, 80, 100],
+        fees=[1, 2, 3, 4, 5],
         start=True,
         expect_fail=False,
         **kwargs,
@@ -365,8 +389,20 @@ class SwapdFactory(object):
         postgres = self.postgres_factory.get_container()
         node = self.node_factory.get_node()
         node_options = self.options_provider.get_options(node)
+
+        base_options = {
+            "lock-time": self.lock_time,
+            "min-claim-blocks": self.min_claim_blocks,
+            "min-viable-cltv": self.min_viable_cltv,
+        }
+
         if options is None:
-            options = {}
+            options = base_options
+        else:
+            for k, v in options.items():
+                base_options[k] = v
+            options = base_options
+
         for k, v in node_options.items():
             options[k] = v
 
@@ -425,6 +461,7 @@ class WhatTheFee(object):
         self.port = port
         self.request_count = 0
         self.quotient = 1
+        self.logger = logging.getLogger("WhatTheFee")
 
     def get_fees(self):
         self.request_count += 1
@@ -438,7 +475,7 @@ class WhatTheFee(object):
         # multiply the caller fees by the quotient.
         fees = ",".join(
             map(
-                lambda x: str(int(x) * self.quotient),
+                lambda x: str(round(math.log(int(x) * self.quotient) * 100)),
                 request.args.get("fees").split(","),
             )
         )
@@ -467,12 +504,12 @@ class WhatTheFee(object):
         while self.server.bind_addr[1] == 0:
             pass
         self.port = self.server.bind_addr[1]
-        logging.debug("WhatTheFee api listening on port {}".format(self.port))
+        self.logger.debug("WhatTheFee api listening on port {}".format(self.port))
 
     def stop(self):
         self.server.stop()
         self.proxy_thread.join()
-        logging.debug(
+        self.logger.debug(
             "WhatTheFee api shut down after processing {} requests".format(
                 self.request_count
             )

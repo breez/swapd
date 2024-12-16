@@ -7,7 +7,8 @@ use std::{
 use bitcoin::{
     address::NetworkUnchecked,
     hashes::{sha256, Hash},
-    Address, Network, OutPoint, PrivateKey, PublicKey, ScriptBuf,
+    secp256k1::{PublicKey, SecretKey},
+    Address, Network, OutPoint, ScriptBuf,
 };
 use futures::TryStreamExt;
 use sqlx::{postgres::PgRow, PgPool, Row};
@@ -16,9 +17,9 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, PaidOutpoint, PaymentAttempt,
-        Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
-        SwapStatePaidOutpoints,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, LockSwapError, LockType,
+        PaidOutpoint, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData,
+        SwapState, SwapStatePaidOutpoints,
     },
 };
 
@@ -34,14 +35,15 @@ impl SwapRepository {
     }
 
     fn map_swap_state(&self, row: &PgRow) -> Result<SwapState, GetSwapsError> {
-        let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
-        let creation_time: i64 = row.try_get("creation_time")?;
-        let payer_pubkey: Vec<u8> = row.try_get("payer_pubkey")?;
-        let swapper_pubkey: Vec<u8> = row.try_get("swapper_pubkey")?;
-        let script: Vec<u8> = row.try_get("script")?;
         let address: &str = row.try_get("address")?;
-        let lock_time: i64 = row.try_get("lock_time")?;
-        let swapper_privkey: Vec<u8> = row.try_get("swapper_privkey")?;
+        let claim_privkey: Vec<u8> = row.try_get("claim_privkey")?;
+        let claim_pubkey: Vec<u8> = row.try_get("claim_pubkey")?;
+        let claim_script: Vec<u8> = row.try_get("claim_script")?;
+        let creation_time: i64 = row.try_get("creation_time")?;
+        let lock_height: i64 = row.try_get("lock_height")?;
+        let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
+        let refund_pubkey: Vec<u8> = row.try_get("refund_pubkey")?;
+        let refund_script: Vec<u8> = row.try_get("refund_script")?;
 
         let creation_time = SystemTime::UNIX_EPOCH
             .checked_add(Duration::from_secs(creation_time as u64))
@@ -53,14 +55,15 @@ impl SwapRepository {
             creation_time,
             public: SwapPublicData {
                 address: address.clone(),
+                claim_pubkey: PublicKey::from_slice(&claim_pubkey)?,
+                claim_script: ScriptBuf::from_bytes(claim_script),
                 hash: sha256::Hash::from_slice(&payment_hash)?,
-                lock_time: lock_time as u32,
-                payer_pubkey: PublicKey::from_slice(&payer_pubkey)?,
-                swapper_pubkey: PublicKey::from_slice(&swapper_pubkey)?,
-                script: ScriptBuf::from_bytes(script),
+                lock_height: lock_height as u32,
+                refund_pubkey: PublicKey::from_slice(&refund_pubkey)?,
+                refund_script: ScriptBuf::from_bytes(refund_script),
             },
             private: SwapPrivateData {
-                swapper_privkey: PrivateKey::from_slice(&swapper_privkey, self.network)?,
+                claim_privkey: SecretKey::from_slice(&claim_privkey)?,
             },
         };
         let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
@@ -83,24 +86,26 @@ impl crate::swap::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError> {
         sqlx::query(
-            r#"INSERT INTO swaps (creation_time
-               ,                  payer_pubkey
-               ,                  swapper_pubkey
+            r#"INSERT INTO swaps (address
+               ,                  claim_privkey
+               ,                  claim_pubkey
+               ,                  claim_script
+               ,                  creation_time
+               ,                  lock_height
                ,                  payment_hash
-               ,                  script
-               ,                  address
-               ,                  lock_time
-               ,                  swapper_privkey
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+               ,                  refund_pubkey
+               ,                  refund_script
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
         )
-        .bind(swap.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
-        .bind(swap.public.payer_pubkey.to_bytes())
-        .bind(swap.public.swapper_pubkey.to_bytes())
-        .bind(swap.public.hash.as_byte_array().to_vec())
-        .bind(swap.public.script.to_bytes())
         .bind(swap.public.address.to_string())
-        .bind(swap.public.lock_time as i64)
-        .bind(swap.private.swapper_privkey.to_bytes())
+        .bind(swap.private.claim_privkey.secret_bytes().to_vec())
+        .bind(swap.public.claim_pubkey.serialize())
+        .bind(swap.public.claim_script.as_bytes())
+        .bind(swap.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+        .bind(swap.public.lock_height as i64)
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(swap.public.refund_pubkey.serialize())
+        .bind(swap.public.refund_script.as_bytes())
         .execute(&*self.pool)
         .await?;
 
@@ -351,19 +356,75 @@ impl crate::swap::SwapRepository for SwapRepository {
 
         Ok(result)
     }
+
+    async fn lock_swap(
+        &self,
+        swap: &Swap,
+        lock_type: LockType,
+    ) -> Result<Option<LockType>, LockSwapError> {
+        let mut tx = self.pool.begin().await?;
+        let extra_where = match lock_type {
+            LockType::Pay => "",
+            LockType::Refund => " OR locked = $2",
+        };
+        let query = format!("
+            UPDATE swaps x
+            SET    locked = $2
+            FROM  (SELECT payment_hash, locked FROM swaps WHERE payment_hash = $1 AND locked IS NULL{} FOR UPDATE) y 
+            WHERE  x.payment_hash = y.payment_hash
+            RETURNING y.locked AS old_locked", extra_where);
+
+        let lock_type: i32 = lock_type.into();
+        let maybe_row = sqlx::query(&query)
+            .bind(swap.public.hash.as_byte_array().to_vec())
+            .bind(lock_type)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+        let row = match maybe_row {
+            Some(row) => row,
+            None => return Err(LockSwapError::AlreadyLocked),
+        };
+
+        let old_lock_type: Option<i32> = row.try_get(0)?;
+        let old_lock_type: Option<LockType> = match old_lock_type {
+            Some(old_lock_type) => Some(old_lock_type.try_into()?),
+            None => None,
+        };
+        tx.commit().await?;
+        Ok(old_lock_type)
+    }
+
+    async fn unlock_swap(&self, swap: &Swap) -> Result<(), LockSwapError> {
+        let query = String::from(
+            "
+            UPDATE swaps 
+            SET locked = NULL 
+            WHERE payment_hash = $1",
+        );
+
+        sqlx::query(&query)
+            .bind(swap.public.hash.as_byte_array().to_vec())
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
 }
 
 fn swap_state_fields(prefix: &str) -> String {
     format!(
-        r#"{0}.payment_hash
+        r#"{0}.address
+         , {0}.claim_privkey
+         , {0}.claim_pubkey
+         , {0}.claim_script
          , {0}.creation_time
-         , {0}.payer_pubkey
-         , {0}.swapper_pubkey
-         , {0}.script
-         , {0}.address
-         , {0}.lock_time
-         , {0}.swapper_privkey
-         , {0}.preimage"#,
+         , {0}.lock_height
+         , {0}.payment_hash
+         , {0}.preimage
+         , {0}.refund_pubkey
+         , {0}.refund_script
+         "#,
         prefix
     )
 }
@@ -431,6 +492,12 @@ impl From<sqlx::Error> for AddPaymentResultError {
 impl From<sqlx::Error> for GetPaidUtxosError {
     fn from(value: sqlx::Error) -> Self {
         GetPaidUtxosError::General(Box::new(value))
+    }
+}
+
+impl From<sqlx::Error> for LockSwapError {
+    fn from(value: sqlx::Error) -> Self {
+        LockSwapError::General(Box::new(value))
     }
 }
 

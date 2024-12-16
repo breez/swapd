@@ -11,6 +11,7 @@ pub enum LightningError {
 #[derive(Debug)]
 pub struct PaymentRequest {
     pub bolt11: String,
+    pub cltv_limit: u32,
     pub payment_hash: sha256::Hash,
     pub label: String,
     pub fee_limit_msat: u64,
@@ -35,5 +36,9 @@ pub trait LightningClient {
         &self,
         hash: sha256::Hash,
     ) -> Result<Option<PreimageResult>, LightningError>;
+    async fn has_pending_or_complete_payment(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<bool, LightningError>;
     async fn pay(&self, request: PaymentRequest) -> Result<PaymentResult, LightningError>;
 }

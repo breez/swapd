@@ -1,8 +1,13 @@
 use bitcoin::{
+    address::NetworkUnchecked,
+    consensus::Decodable,
     hashes::{sha256::Hash, Hash as _},
-    Address, CompressedPublicKey, Network, PublicKey,
+    secp256k1::PublicKey,
+    Address, CompressedPublicKey, Network, Transaction, TxOut,
 };
+use futures::future::join_all;
 use lightning_invoice::Bolt11Invoice;
+use secp256k1::musig::MusigPubNonce;
 use std::sync::Arc;
 use std::{
     fmt::Debug,
@@ -17,18 +22,16 @@ use crate::{
         FeeEstimator, Utxo,
     },
     chain_filter::ChainFilterService,
-    lightning::{LightningClient, LightningError, PaymentRequest},
-    public_server::swap_api::AddressStatus,
-    swap::{PaymentAttempt, RedeemableUtxo},
+    lightning::{LightningClient, LightningError, PaymentRequest, PaymentResult},
+    swap::{ClaimableUtxo, LockSwapError, LockType, PaymentAttempt},
 };
 
 use crate::swap::{
-    CreateSwapError, GetSwapsError, PrivateKeyProvider, SwapPersistenceError, SwapRepository,
-    SwapService,
+    GetSwapsError, PrivateKeyProvider, SwapPersistenceError, SwapRepository, SwapService,
 };
 use swap_api::{
-    swapper_server::Swapper, AddFundInitReply, AddFundInitRequest, AddFundStatusReply,
-    AddFundStatusRequest, GetSwapPaymentReply, GetSwapPaymentRequest,
+    swapper_server::Swapper, CreateSwapRequest, CreateSwapResponse, PaySwapRequest,
+    PaySwapResponse, RefundSwapRequest, RefundSwapResponse,
 };
 
 pub mod swap_api {
@@ -49,7 +52,8 @@ where
     pub network: Network,
     pub max_swap_amount_sat: u64,
     pub min_confirmations: u64,
-    pub min_redeem_blocks: u32,
+    pub min_claim_blocks: u32,
+    pub min_viable_cltv: u32,
     pub pay_fee_limit_base_msat: u64,
     pub pay_fee_limit_ppm: u64,
     pub pay_timeout_seconds: u16,
@@ -76,11 +80,12 @@ where
     network: Network,
     max_swap_amount_sat: u64,
     min_confirmations: u64,
-    min_redeem_blocks: u32,
+    min_claim_blocks: u32,
+    min_viable_cltv: u32,
     pay_fee_limit_base_msat: u64,
     pay_fee_limit_ppm: u64,
     pay_timeout_seconds: u16,
-    chain_service: Arc<C>,
+    chain_client: Arc<C>,
     chain_filter_service: Arc<CF>,
     chain_repository: Arc<CR>,
     lightning_client: Arc<L>,
@@ -102,13 +107,14 @@ where
     pub fn new(params: SwapServerParams<C, CF, CR, L, P, R, F>) -> Self {
         SwapServer {
             network: params.network,
-            min_confirmations: params.min_confirmations,
-            min_redeem_blocks: params.min_redeem_blocks,
             max_swap_amount_sat: params.max_swap_amount_sat,
+            min_confirmations: params.min_confirmations,
+            min_claim_blocks: params.min_claim_blocks,
+            min_viable_cltv: params.min_viable_cltv,
             pay_fee_limit_base_msat: params.pay_fee_limit_base_msat,
             pay_fee_limit_ppm: params.pay_fee_limit_ppm,
             pay_timeout_seconds: params.pay_timeout_seconds,
-            chain_service: params.chain_service,
+            chain_client: params.chain_service,
             chain_filter_service: params.chain_filter_service,
             chain_repository: params.chain_repository,
             lightning_client: params.lightning_client,
@@ -130,16 +136,15 @@ where
     F: FeeEstimator + Debug + Send + Sync + 'static,
 {
     #[instrument(skip(self), level = "debug")]
-    async fn add_fund_init(
+    async fn create_swap(
         &self,
-        request: Request<AddFundInitRequest>,
-    ) -> Result<Response<AddFundInitReply>, Status> {
-        debug!("add_fund_init request");
+        request: Request<CreateSwapRequest>,
+    ) -> Result<Response<CreateSwapResponse>, Status> {
+        debug!("create_swap request");
         let req = request.into_inner();
-        // TODO: Return errors in this function in error message rather than status?
-        let payer_pubkey = PublicKey::from_slice(&req.pubkey).map_err(|_| {
-            trace!("got invalid pubkey");
-            Status::invalid_argument("invalid pubkey")
+        let payer_pubkey = PublicKey::from_slice(&req.refund_pubkey).map_err(|_| {
+            trace!("got invalid refund_pubkey");
+            Status::invalid_argument("invalid refund_pubkey")
         })?;
         let hash = Hash::from_slice(&req.hash).map_err(|_| {
             trace!("got invalid hash");
@@ -147,12 +152,15 @@ where
         })?;
 
         // Get a fee estimate for the next block to account for worst case fees.
-        let fee_estimate = self.fee_estimator.estimate_fee(1).await?;
+        let current_height = self.chain_client.get_blockheight().await?;
 
-        // Assume a weight of 1000 for the transaction
-        let min_allowed_deposit = fee_estimate.sat_per_kw.saturating_mul(3) / 2;
-
-        let swap = self.swap_service.create_swap(payer_pubkey, hash)?;
+        let swap = self
+            .swap_service
+            .create_swap(payer_pubkey, hash, current_height)
+            .map_err(|e| {
+                error!("failed to create swap: {:?}", e);
+                Status::internal("internal error")
+            })?;
         self.chain_repository
             .add_watch_address(&swap.public.address)
             .await?;
@@ -163,95 +171,22 @@ where
             address = field::display(&swap.public.address),
             "new swap created"
         );
-        Ok(Response::new(AddFundInitReply {
+
+        // TODO: Add min/max allowed here?
+        Ok(Response::new(CreateSwapResponse {
             address: swap.public.address.to_string(),
-            error_message: String::default(),
-            lock_height: swap.public.lock_time as i64,
-            max_allowed_deposit: self.max_swap_amount_sat as i64,
-            min_allowed_deposit: min_allowed_deposit as i64,
-            pubkey: swap.public.swapper_pubkey.to_bytes(),
+            claim_pubkey: swap.public.claim_pubkey.serialize().to_vec(),
+            lock_height: swap.public.lock_height,
         }))
     }
 
     #[instrument(skip(self), level = "debug")]
-    async fn add_fund_status(
+    async fn pay_swap(
         &self,
-        request: Request<AddFundStatusRequest>,
-    ) -> Result<Response<AddFundStatusReply>, Status> {
-        debug!("add_fund_status request");
-        let req = request.into_inner();
-        let addresses = req
-            .addresses
-            .iter()
-            .map(|a| {
-                let a = match a.parse::<Address<_>>() {
-                    Ok(a) => a,
-                    Err(e) => {
-                        trace!("got invalid address: {:?}", e);
-                        return Err(Status::invalid_argument("invalid address"));
-                    }
-                };
-                let a = match a.require_network(self.network) {
-                    Ok(a) => a,
-                    Err(_) => {
-                        trace!("got invalid address (invalid network)");
-                        return Err(Status::invalid_argument("invalid address"));
-                    }
-                };
-                Ok(a)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let swaps = self
-            .swap_repository
-            .get_swaps(&addresses)
-            .await
-            .map_err(|e| {
-                error!("failed to get swap state: {:?}", e);
-                Status::internal("internal error")
-            })?;
-        let address_utxos = self
-            .chain_repository
-            .get_utxos_for_addresses(&addresses)
-            .await?;
-
-        // TODO: addresses could have multiple utxos.
-        // TODO: 'confirmed' doesn't make sense below, because they're always confirmed.
-        Ok(Response::new(AddFundStatusReply {
-            statuses: addresses
-                .iter()
-                .filter_map(|address| {
-                    let _swap = match swaps.get(address) {
-                        Some(swap) => swap,
-                        None => return None,
-                    };
-                    let utxo = match address_utxos.get(address) {
-                        Some(utxos) => match utxos.first() {
-                            Some(utxo) => utxo,
-                            None => return None,
-                        },
-                        None => return None,
-                    };
-                    Some((
-                        address.to_string(),
-                        AddressStatus {
-                            amount: utxo.amount_sat as i64,
-                            block_hash: utxo.block_hash.to_string(),
-                            tx: utxo.outpoint.txid.to_string(),
-                            confirmed: true,
-                        },
-                    ))
-                })
-                .collect(),
-        }))
-    }
-
-    #[instrument(skip(self), level = "debug")]
-    async fn get_swap_payment(
-        &self,
-        request: Request<GetSwapPaymentRequest>,
-    ) -> Result<Response<GetSwapPaymentReply>, Status> {
-        debug!("get_swap_payment request");
+        request: Request<PaySwapRequest>,
+    ) -> Result<Response<PaySwapResponse>, Status> {
+        // TODO: Ensure swap is not refunded and cannot be refunded at the same time.
+        debug!("pay_swap request");
         let req = request.into_inner();
         let invoice: Bolt11Invoice = req.payment_request.parse().map_err(|e| {
             trace!("got invalid payment request: {:?}", e);
@@ -294,6 +229,32 @@ where
             return Err(Status::failed_precondition("swap already paid"));
         }
 
+        let current_height = self.chain_client.get_blockheight().await?;
+        let blocks_left = match swap_state.blocks_left(current_height) {
+            blocks_left if blocks_left < 0 => {
+                return Err(Status::failed_precondition("swap expired"))
+            }
+            blocks_left => blocks_left as u32,
+        }
+        .saturating_sub(self.min_claim_blocks);
+        let min_final_cltv_expiry_delta: u32 = invoice
+            .min_final_cltv_expiry_delta()
+            .try_into()
+            .map_err(|_| {
+                trace!("min_final_cltv_expiry_delta exceeds u32::MAX");
+                Status::invalid_argument("min_final_cltv_expiry_delta too high")
+            })?;
+        if blocks_left == 0
+            || blocks_left.saturating_sub(min_final_cltv_expiry_delta) < self.min_viable_cltv
+        {
+            trace!(
+                blocks_left,
+                min_viable_cltv = self.min_viable_cltv,
+                "payout blocks left too low"
+            );
+            return Err(Status::failed_precondition("swap expired"));
+        }
+
         let utxos = self
             .chain_repository
             .get_utxos_for_address(&swap_state.swap.public.address)
@@ -304,12 +265,6 @@ where
             return Err(Status::failed_precondition("no utxos found"));
         }
 
-        let current_height = self.chain_service.get_blockheight().await?;
-        let max_confirmations = swap_state
-            .swap
-            .public
-            .lock_time
-            .saturating_sub(self.min_redeem_blocks) as u64;
         let utxos = utxos
             .into_iter()
             .filter(|utxo| {
@@ -324,19 +279,10 @@ where
                     return false;
                 }
 
-                if confirmations > max_confirmations {
-                    debug!(
-                        outpoint = field::display(utxo.outpoint),
-                        confirmations, max_confirmations, "utxo has more than max confirmations"
-                    );
-                    return false;
-                }
-
                 trace!(
                     outpoint = field::display(utxo.outpoint),
                     confirmations,
                     min_confirmations = self.min_confirmations,
-                    max_confirmations,
                     "utxo has correct amount of confirmations"
                 );
                 true
@@ -354,7 +300,9 @@ where
 
         // TODO: Add ability to charge a fee?
         // Sum the utxo amounts.
-        let amount_sum_sat = utxos.iter().fold(0u64, |sum, utxo| sum + utxo.amount_sat);
+        let amount_sum_sat = utxos
+            .iter()
+            .fold(0u64, |sum, utxo| sum + utxo.tx_out.value.to_sat());
         if amount_sum_sat != amount_sat {
             trace!(
                 amount_sum_sat,
@@ -367,7 +315,7 @@ where
         }
 
         // Do a fee estimation with 6 blocks in order to check whether the swap
-        // is redeemable within reasonable time.
+        // is claimable within reasonable time.
         let fee_estimate = self.fee_estimator.estimate_fee(6).await?;
         let fake_address = Address::p2wpkh(
             &CompressedPublicKey::from_slice(&[0x02; 33]).map_err(|e| {
@@ -377,12 +325,12 @@ where
             self.network,
         );
 
-        // If the redeem tx can be created, this is a valid swap.
+        // If the claim tx can be created, this is a valid swap.
         self.swap_service
-            .create_redeem_tx(
+            .create_claim_tx(
                 &utxos
                     .iter()
-                    .map(|utxo| RedeemableUtxo {
+                    .map(|utxo| ClaimableUtxo {
                         swap: swap_state.swap.clone(),
                         utxo: utxo.clone(),
                         paid_with_request: None,
@@ -394,12 +342,12 @@ where
                 fake_address,
             )
             .map_err(|e| {
-                debug!("could not create valid fake redeem tx: {:?}", e);
+                debug!("could not create valid fake claim tx: {:?}", e);
                 Status::failed_precondition("value too low")
             })?;
 
         // Store the payment attempt to ensure not 'too many' utxos are claimed
-        // on redeem if a user accidentally sends multiple utxos to the same
+        // on claim if a user accidentally sends multiple utxos to the same
         // address.
         let now = SystemTime::now();
         let unix_ns_now = now
@@ -410,6 +358,20 @@ where
             })?
             .as_nanos();
         let label = format!("{}-{}", hash, unix_ns_now);
+        match self
+            .swap_repository
+            .lock_swap(&swap_state.swap, LockType::Pay)
+            .await
+        {
+            Ok(_) => {}
+            Err(LockSwapError::AlreadyLocked) => {
+                return Err(Status::failed_precondition("swap is locked"))
+            }
+            Err(e) => {
+                error!("failed to lock swap for payment: {:?}", e);
+                return Err(Status::internal("internal error"));
+            }
+        };
         self.swap_repository
             .add_payment_attempt(&PaymentAttempt {
                 amount_msat,
@@ -423,8 +385,8 @@ where
             .await?;
 
         // Pay the user. After the payment succeeds, we will have paid the
-        // funds, but not redeemed anything onchain yet. That will happen in the
-        // redeem module.
+        // funds, but not claimed anything onchain yet. That will happen in the
+        // claim module.
         // TODO: Add a maximum fee here?
         let fee_limit_msat = self.pay_fee_limit_base_msat
             + amount_msat
@@ -435,19 +397,13 @@ where
             .lightning_client
             .pay(PaymentRequest {
                 bolt11: req.payment_request,
+                cltv_limit: blocks_left,
                 payment_hash: *hash,
                 label: label.clone(),
                 fee_limit_msat,
                 timeout_seconds: self.pay_timeout_seconds,
             })
             .await?;
-
-        info!(
-            label = field::display(&label),
-            hash = field::display(hash),
-            address = field::display(swap_state.swap.public.address),
-            "successfully paid"
-        );
 
         // Persist the preimage right away. There's also a background service
         // checking for preimages, in case the `pay` call failed, but the
@@ -461,14 +417,158 @@ where
             Err(e) => {
                 error!(
                     hash = field::display(swap_state.swap.public.hash),
-                    result = field::debug(pay_result),
+                    result = field::debug(&pay_result),
                     "failed to persist pay result: {:?}",
                     e
                 );
             }
         };
 
-        Ok(Response::new(GetSwapPaymentReply::default()))
+        let _ = self.swap_repository.unlock_swap(&swap_state.swap).await;
+        let response = match pay_result {
+            PaymentResult::Success { preimage: _ } => {
+                info!(
+                    label = field::display(&label),
+                    hash = field::display(hash),
+                    address = field::display(swap_state.swap.public.address),
+                    "successfully paid"
+                );
+                PaySwapResponse::default()
+            }
+            PaymentResult::Failure { error } => {
+                info!("payment failed with: {}", error);
+                return Err(Status::unknown("payment failed"));
+            }
+        };
+
+        Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self), level = "debug")]
+    async fn refund_swap(
+        &self,
+        request: Request<RefundSwapRequest>,
+    ) -> Result<Response<RefundSwapResponse>, Status> {
+        debug!("refund_swap request");
+        let req = request.into_inner();
+        let tx = Transaction::consensus_decode(&mut req.transaction.as_slice()).map_err(|e| {
+            trace!("got invalid transaction: {:?}", e);
+            Status::invalid_argument("invalid transaction")
+        })?;
+        let their_pub_nonce = MusigPubNonce::from_slice(&req.pub_nonce).map_err(|e| {
+            trace!("got invalid pub nonce: {:?}", e);
+            Status::invalid_argument("invalid pub_nonce")
+        })?;
+        let input_index = req.input_index as usize;
+        if input_index >= tx.input.len() {
+            trace!("got input_index above tx input length");
+            return Err(Status::invalid_argument("invalid input_index"));
+        }
+        let address = req
+            .address
+            .parse::<Address<NetworkUnchecked>>()
+            .map_err(|e| {
+                trace!("could not parse address: {:?}", e);
+                Status::invalid_argument("invalid address")
+            })?
+            .require_network(self.network)
+            .map_err(|e| {
+                trace!("address for wrong network: {:?}", e);
+                Status::invalid_argument("invalid address")
+            })?;
+
+        let swap = self.swap_repository.get_swap_by_address(&address).await?;
+
+        let prevout_futures = tx.input.iter().map(|vin| async {
+            let tx = self
+                .chain_client
+                .get_transaction(&vin.previous_output.txid)
+                .await
+                .map_err(|e| {
+                    trace!("refund tx input not found: {:?}", e);
+                    Status::invalid_argument("invalid transaction input")
+                })?;
+            if vin.previous_output.vout as usize >= tx.output.len() {
+                return Err(Status::invalid_argument("invalid transaction input"));
+            }
+
+            Ok(tx.output[vin.previous_output.vout as usize].clone())
+        });
+        let prevouts: Vec<TxOut> = join_all(prevout_futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(
+            prevouts.len() == tx.input.len(),
+            "expected prevouts len to be equal to tx input len."
+        );
+
+        // Double check this is signing a refund to an actual swap output.
+        let refund_prevout = &prevouts[input_index];
+        let refund_prevout_address =
+            Address::from_script(&refund_prevout.script_pubkey, self.network).map_err(|e| {
+                trace!("refund tx input is not a valid address: {:?}", e);
+                Status::invalid_argument("invalid transaction input")
+            })?;
+
+        if refund_prevout_address != address {
+            return Err(Status::invalid_argument("invalid transaction input"));
+        }
+
+        let (partial_signature, our_pub_nonce) = self
+            .swap_service
+            .partial_sign_refund_tx(&swap.swap, tx, prevouts, input_index, their_pub_nonce)
+            .map_err(|e| {
+                error!("failed to sign refund transaction: {:?}", e);
+                Status::internal("internal error")
+            })?;
+
+        // Ensure this swap is not used for paying out at the moment, also
+        // prevent payouts from happening in the future. Note this will never be
+        // unlocked, because the user may steal funds if it's ever paid out. The
+        // user _can_ create a new refund later, however.
+        let was_locked = match self
+            .swap_repository
+            .lock_swap(&swap.swap, LockType::Refund)
+            .await
+        {
+            Ok(old_lock_type) => old_lock_type.is_some(),
+            Err(LockSwapError::AlreadyLocked) => {
+                return Err(Status::failed_precondition("swap is locked"))
+            }
+            Err(e) => {
+                error!("failed to lock swap for refund: {:?}", e);
+                return Err(Status::internal("internal error"));
+            }
+        };
+
+        match self
+            .lightning_client
+            .has_pending_or_complete_payment(&swap.swap.public.hash)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => {
+                if !was_locked {
+                    let _ = self.swap_repository.unlock_swap(&swap.swap).await;
+                }
+
+                return Err(Status::failed_precondition("swap is locked"));
+            }
+            Err(e) => {
+                error!("failed to check for pending or complete payment: {:?}", e);
+                if !was_locked {
+                    let _ = self.swap_repository.unlock_swap(&swap.swap).await;
+                }
+
+                return Err(Status::internal("internal error"));
+            }
+        }
+
+        Ok(Response::new(RefundSwapResponse {
+            partial_signature: partial_signature.serialize().to_vec(),
+            pub_nonce: our_pub_nonce.serialize().to_vec(),
+        }))
     }
 }
 
@@ -500,17 +600,6 @@ impl From<GetSwapsError> for Status {
             }
             GetSwapsError::InvalidPreimage => {
                 error!("got invalid preimage");
-                Status::internal("internal error")
-            }
-        }
-    }
-}
-
-impl From<CreateSwapError> for Status {
-    fn from(value: CreateSwapError) -> Self {
-        match value {
-            CreateSwapError::PrivateKeyError => {
-                error!("failed to create swap due to private key error.");
                 Status::internal("internal error")
             }
         }

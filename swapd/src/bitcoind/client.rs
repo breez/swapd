@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bitcoin::{
     consensus::{deserialize, encode::serialize_hex, Decodable},
     hashes::{hex::FromHex, sha256d},
-    Address, Block, BlockHash, Network, OutPoint, Transaction,
+    Address, Block, BlockHash, Network, OutPoint, Transaction, Txid,
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
@@ -260,6 +260,14 @@ impl ChainClient for BitcoindClient {
         }
 
         Ok(addresses)
+    }
+
+    async fn get_transaction(&self, tx_id: &Txid) -> Result<Transaction, ChainError> {
+        let tx = self.getrawtransaction(tx_id.to_string()).await?;
+        let tx = hex::decode(tx.str)
+            .map_err(|e| ChainError::General(format!("invalid tx hex: {:?}", e).into()))?;
+        let tx = Transaction::consensus_decode(&mut &tx[..])?;
+        Ok(tx)
     }
 }
 

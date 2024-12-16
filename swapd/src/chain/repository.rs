@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use bitcoin::{Address, BlockHash, OutPoint, Txid};
 use thiserror::Error;
 
@@ -46,9 +44,5 @@ pub trait ChainRepository {
         &self,
         address: &Address,
     ) -> Result<Vec<Utxo>, ChainRepositoryError>;
-    async fn get_utxos_for_addresses(
-        &self,
-        address: &[Address],
-    ) -> Result<HashMap<Address, Vec<Utxo>>, ChainRepositoryError>;
     async fn undo_block(&self, hash: BlockHash) -> Result<(), ChainRepositoryError>;
 }

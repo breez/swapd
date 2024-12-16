@@ -4,12 +4,12 @@ use bitcoin::Network;
 use bitcoind::BitcoindClient;
 use chain::{ChainMonitor, FallbackFeeEstimator};
 use chain_filter::ChainFilterImpl;
+use claim::{ClaimMonitor, ClaimMonitorParams, ClaimService, PreimageMonitor};
 use clap::Parser;
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use lightning::LightningClient;
 use postgresql::LndRepository;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
-use redeem::{PreimageMonitor, RedeemMonitor, RedeemMonitorParams, RedeemService};
 use reqwest::Url;
 use sqlx::{PgPool, Pool, Postgres};
 use swap::{RandomPrivateKeyProvider, SwapService};
@@ -24,13 +24,13 @@ use whatthefee::WhatTheFeeEstimator;
 mod bitcoind;
 mod chain;
 mod chain_filter;
+mod claim;
 mod cln;
 mod internal_server;
 mod lightning;
 mod lnd;
 mod postgresql;
 mod public_server;
-mod redeem;
 mod swap;
 mod wallet;
 mod whatthefee;
@@ -68,9 +68,11 @@ struct Args {
     #[arg(long, default_value = "4_000_000")]
     pub max_swap_amount_sat: u64,
 
-    /// Locktime for swaps. This is the time between confirmation of the swap
-    /// until the client can get a refund.
-    #[arg(long, default_value = "288")]
+    /// Locktime for swaps. This is the time between creation of the swap
+    /// address until the client can get a refund. The swap address will contain
+    /// a script with an absolute locktime which is the current height + lock
+    /// time.
+    #[arg(long, default_value = "1008")]
     pub lock_time: u32,
 
     /// Minimum number of confirmations required before a swap is eligible for
@@ -78,11 +80,11 @@ struct Args {
     #[arg(long, default_value = "1")]
     pub min_confirmations: u64,
 
-    /// Minimum number of blocks needed to redeem a utxo onchain. A utxo is no
+    /// Minimum number of blocks needed to claim a utxo onchain. A utxo is no
     /// longer eligible for payout when the lock time left is less than this
     /// number.
     #[arg(long, default_value = "72")]
-    pub min_redeem_blocks: u32,
+    pub min_claim_blocks: u32,
 
     /// Bitcoin network. Valid values are bitcoin, testnet, signet, regtest.
     #[arg(long, default_value = "bitcoin")]
@@ -154,9 +156,9 @@ struct Args {
     #[arg(long, default_value = "60")]
     pub chain_poll_interval_seconds: u64,
 
-    /// Polling interval between redeem runs.
+    /// Polling interval between claim runs.
     #[arg(long, default_value = "60")]
-    pub redeem_poll_interval_seconds: u64,
+    pub claim_poll_interval_seconds: u64,
 
     /// Polling interval between checking for uncaught preimages.
     #[arg(long, default_value = "60")]
@@ -174,10 +176,10 @@ struct Args {
     #[arg(long, default_value = "https://whatthefee.io/data.json")]
     pub whatthefee_url: Url,
 
-    /// If this flag is set, the redeem logic will not run in this process. It
+    /// If this flag is set, the claim logic will not run in this process. It
     /// should then be run separately.
     #[arg(long)]
-    pub no_redeem: bool,
+    pub no_claim: bool,
 
     /// If this flag is set, the chain sync will not run in this process. It
     /// should then be run separately.
@@ -194,19 +196,23 @@ struct Args {
     #[arg(long)]
     pub no_servers: bool,
 
-    // Base fee component of the maximum payment fee. The max fee is calculated
-    // as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
+    /// Base fee component of the maximum payment fee. The max fee is calculated
+    /// as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
     #[arg(long, default_value = "5000")]
     pub pay_fee_limit_base_msat: u64,
 
-    // Fee rate component of the maximum payment fee. The max fee is calculated
-    // as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
+    /// Fee rate component of the maximum payment fee. The max fee is calculated
+    /// as `pay_fee_limit_base + (amount_msat * pay_fee_limit_ppm / 1_000_000)`.
     #[arg(long, default_value = "4000")]
     pub pay_fee_limit_ppm: u64,
 
-    // Payment timeout in seconds.
+    /// Payment timeout in seconds.
     #[arg(long, default_value = "120")]
     pub pay_timeout_seconds: u16,
+
+    /// Minimum viable cltv for payout.
+    #[arg(long, default_value = "40")]
+    pub min_viable_cltv: u32,
 }
 
 #[tokio::main]
@@ -287,7 +293,7 @@ async fn run_with_client<T>(
 where
     T: LightningClient + Wallet + Send + Sync + Debug + 'static,
 {
-    let privkey_provider = RandomPrivateKeyProvider::new(args.network);
+    let privkey_provider = RandomPrivateKeyProvider::new();
     let swap_service = Arc::new(SwapService::new(
         args.network,
         privkey_provider,
@@ -312,7 +318,7 @@ where
     ));
     let chain_filter_repository =
         Arc::new(postgresql::ChainFilterRepository::new(Arc::clone(&pgpool)));
-    let redeem_repository = Arc::new(postgresql::RedeemRepository::new(
+    let claim_repository = Arc::new(postgresql::ClaimRepository::new(
         Arc::clone(&pgpool),
         args.network,
     ));
@@ -329,10 +335,10 @@ where
     let fee_estimator_2 = bitcoind::FeeEstimator::new(Arc::clone(&chain_client));
     let fee_estimator = Arc::new(FallbackFeeEstimator::new(fee_estimator_1, fee_estimator_2));
 
-    let redeem_service = Arc::new(RedeemService::new(
+    let claim_service = Arc::new(ClaimService::new(
         Arc::clone(&chain_client),
         Arc::clone(&chain_repository),
-        Arc::clone(&redeem_repository),
+        Arc::clone(&claim_repository),
         Arc::clone(&swap_repository),
         Arc::clone(&swap_service),
     ));
@@ -350,26 +356,24 @@ where
         }
         signal_token.cancel();
     });
-    if !args.no_redeem {
-        let redeem_monitor_token = token.clone();
-        let redeem_monitor = RedeemMonitor::new(RedeemMonitorParams {
+    if !args.no_claim {
+        let claim_monitor_token = token.clone();
+        let claim_monitor = ClaimMonitor::new(ClaimMonitorParams {
             chain_client: Arc::clone(&chain_client),
             fee_estimator: Arc::clone(&fee_estimator),
-            poll_interval: Duration::from_secs(args.redeem_poll_interval_seconds),
-            redeem_repository: Arc::clone(&redeem_repository),
-            redeem_service: Arc::clone(&redeem_service),
+            poll_interval: Duration::from_secs(args.claim_poll_interval_seconds),
+            claim_repository: Arc::clone(&claim_repository),
+            claim_service: Arc::clone(&claim_service),
             wallet: Arc::clone(&lightning_client),
         });
         tracker.spawn(async move {
-            info!("Starting redeem monitor");
-            let res = redeem_monitor
-                .start(redeem_monitor_token.child_token())
-                .await;
+            info!("Starting claim monitor");
+            let res = claim_monitor.start(claim_monitor_token.child_token()).await;
             match res {
-                Ok(_) => info!("redeem monitor exited"),
-                Err(e) => info!("redeem monitor exited with {:?}", e),
+                Ok(_) => info!("claim monitor exited"),
+                Err(e) => info!("claim monitor exited with {:?}", e),
             };
-            redeem_monitor_token.cancel();
+            claim_monitor_token.cancel();
         });
     }
     if !args.no_preimage {
@@ -416,7 +420,8 @@ where
             network: args.network,
             max_swap_amount_sat: args.max_swap_amount_sat,
             min_confirmations: args.min_confirmations,
-            min_redeem_blocks: args.min_redeem_blocks,
+            min_claim_blocks: args.min_claim_blocks,
+            min_viable_cltv: args.min_viable_cltv,
             pay_fee_limit_base_msat: args.pay_fee_limit_base_msat,
             pay_fee_limit_ppm: args.pay_fee_limit_ppm,
             pay_timeout_seconds: args.pay_timeout_seconds,
@@ -455,7 +460,7 @@ where
                 swap_repository: Arc::clone(&swap_repository),
                 wallet: Arc::clone(&lightning_client),
                 network: args.network,
-                redeem_service: Arc::clone(&redeem_service),
+                claim_service: Arc::clone(&claim_service),
                 token: token.clone(),
             },
         ));

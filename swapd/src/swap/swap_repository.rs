@@ -20,6 +20,43 @@ pub enum AddPaymentResultError {
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum LockType {
+    Pay,
+    Refund,
+}
+
+impl TryFrom<i32> for LockType {
+    type Error = LockSwapError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => LockType::Pay,
+            1 => LockType::Refund,
+            _ => return Err(LockSwapError::InvalidLockType),
+        })
+    }
+}
+
+impl From<LockType> for i32 {
+    fn from(value: LockType) -> i32 {
+        match value {
+            LockType::Pay => 0,
+            LockType::Refund => 1,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LockSwapError {
+    #[error("already locked")]
+    AlreadyLocked,
+    #[error("invalid lock type")]
+    InvalidLockType,
+    #[error("{0}")]
+    General(Box<dyn std::error::Error + Sync + Send>),
+}
+
 #[derive(Debug, Error)]
 pub enum GetPaidUtxosError {
     #[error("{0}")]
@@ -86,4 +123,10 @@ pub trait SwapRepository {
         &self,
         addresses: &[Address],
     ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError>;
+    async fn lock_swap(
+        &self,
+        swap: &Swap,
+        lock_type: LockType,
+    ) -> Result<Option<LockType>, LockSwapError>;
+    async fn unlock_swap(&self, swap: &Swap) -> Result<(), LockSwapError>;
 }

@@ -7,7 +7,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use internal_swap_api::{
     swap_manager_client::SwapManagerClient, AddAddressFiltersRequest, GetInfoRequest,
-    GetSwapRequest, ListRedeemableRequest,
+    GetSwapRequest, ListClaimableRequest,
 };
 use tonic::{
     transport::{Channel, Uri},
@@ -48,7 +48,7 @@ enum Command {
         #[clap(long, value_parser(parse_hex))]
         hash: Option<Vec<u8>>,
     },
-    ListRedeemable,
+    ListClaimable,
 }
 
 #[derive(Subcommand)]
@@ -92,9 +92,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into_inner();
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
-        Command::ListRedeemable => {
+        Command::ListClaimable => {
             let resp = client
-                .list_redeemable(Request::new(ListRedeemableRequest::default()))
+                .list_claimable(Request::new(ListClaimableRequest::default()))
                 .await?
                 .into_inner();
             println!("{}", serde_json::to_string_pretty(&resp)?)
