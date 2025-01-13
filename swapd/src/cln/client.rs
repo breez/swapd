@@ -192,7 +192,7 @@ impl LightningClient for Client {
     }
 }
 
-async fn wait_payment<'a>(
+async fn wait_payment(
     client: &mut NodeClient<Channel>,
     payment_hash: sha256::Hash,
 ) -> Result<Option<PaymentResult>, LightningError> {

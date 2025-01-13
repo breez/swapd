@@ -183,11 +183,7 @@ impl<'a> ForwardChainIterator<'a> {
 impl<'a> Iterator for ForwardChainIterator<'a> {
     type Item = &'a BlockHeader;
     fn next(&mut self) -> Option<&'a BlockHeader> {
-        let current = match self.current {
-            Some(current) => current,
-            None => return None,
-        };
-
+        let current = self.current?;
         self.current = match current.next {
             Some(next) => Some(
                 self.chain
@@ -223,11 +219,7 @@ impl<'a> BackwardChainIterator<'a> {
 impl<'a> Iterator for BackwardChainIterator<'a> {
     type Item = &'a BlockHeader;
     fn next(&mut self) -> Option<&'a BlockHeader> {
-        let current = match self.current {
-            Some(current) => current,
-            None => return None,
-        };
-
+        let current = self.current?;
         self.current = match current.header.hash == self.chain.base {
             true => None,
             false => Some(
