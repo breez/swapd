@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use bitcoin::secp256k1::SecretKey;
-use ring::rand::{SecureRandom, SystemRandom};
 use thiserror::Error;
+
+use super::random_provider::{RandomError, RandomProvider};
 
 pub trait PrivateKeyProvider {
     fn new_private_key(&self) -> Result<SecretKey, PrivateKeyError>;
@@ -13,29 +16,32 @@ pub enum PrivateKeyError {
 }
 
 #[derive(Debug)]
-pub struct RandomPrivateKeyProvider {
-    rnd: SystemRandom,
+pub struct RandomPrivateKeyProvider<RP> {
+    rnd: Arc<RP>,
 }
 
-impl RandomPrivateKeyProvider {
-    pub fn new() -> Self {
-        Self {
-            rnd: SystemRandom::new(),
-        }
+impl<RP> RandomPrivateKeyProvider<RP>
+where
+    RP: RandomProvider,
+{
+    pub fn new(rnd: Arc<RP>) -> Self {
+        Self { rnd }
     }
 }
 
-impl PrivateKeyProvider for RandomPrivateKeyProvider {
+impl<RP> PrivateKeyProvider for RandomPrivateKeyProvider<RP>
+where
+    RP: RandomProvider,
+{
     fn new_private_key(&self) -> Result<SecretKey, PrivateKeyError> {
-        let mut key = [0u8; 32];
-        self.rnd.fill(&mut key)?;
+        let key = self.rnd.rnd_32()?;
         Ok(SecretKey::from_slice(&key)?)
     }
 }
 
-impl From<ring::error::Unspecified> for PrivateKeyError {
-    fn from(_value: ring::error::Unspecified) -> Self {
-        PrivateKeyError::General("unspecified error".into())
+impl From<RandomError> for PrivateKeyError {
+    fn from(value: RandomError) -> Self {
+        PrivateKeyError::General(format!("random error: {}", value).into())
     }
 }
 

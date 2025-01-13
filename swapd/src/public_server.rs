@@ -23,7 +23,7 @@ use crate::{
     },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, LightningError, PaymentRequest, PaymentResult},
-    swap::{ClaimableUtxo, LockSwapError, LockType, PaymentAttempt},
+    swap::{ClaimableUtxo, LockSwapError, PaymentAttempt, RandomError, RandomProvider},
 };
 
 use crate::swap::{
@@ -39,7 +39,7 @@ pub mod swap_api {
 }
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];
-pub struct SwapServerParams<C, CF, CR, L, P, R, F>
+pub struct SwapServerParams<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient,
     CF: ChainFilterService,
@@ -47,6 +47,7 @@ where
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
+    RP: RandomProvider,
     F: FeeEstimator,
 {
     pub network: Network,
@@ -61,13 +62,14 @@ where
     pub chain_filter_service: Arc<CF>,
     pub chain_repository: Arc<CR>,
     pub lightning_client: Arc<L>,
+    pub random_provider: Arc<RP>,
     pub swap_service: Arc<SwapService<P>>,
     pub swap_repository: Arc<R>,
     pub fee_estimator: Arc<F>,
 }
 
 #[derive(Debug)]
-pub struct SwapServer<C, CF, CR, L, P, R, F>
+pub struct SwapServer<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient,
     CF: ChainFilterService,
@@ -75,6 +77,7 @@ where
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
+    RP: RandomProvider,
     F: FeeEstimator,
 {
     network: Network,
@@ -89,12 +92,13 @@ where
     chain_filter_service: Arc<CF>,
     chain_repository: Arc<CR>,
     lightning_client: Arc<L>,
+    random_provider: Arc<RP>,
     swap_service: Arc<SwapService<P>>,
     swap_repository: Arc<R>,
     fee_estimator: Arc<F>,
 }
 
-impl<C, CF, CR, L, P, R, F> SwapServer<C, CF, CR, L, P, R, F>
+impl<C, CF, CR, L, P, R, RP, F> SwapServer<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient,
     CF: ChainFilterService,
@@ -102,9 +106,10 @@ where
     L: LightningClient,
     P: PrivateKeyProvider,
     R: SwapRepository,
+    RP: RandomProvider,
     F: FeeEstimator,
 {
-    pub fn new(params: SwapServerParams<C, CF, CR, L, P, R, F>) -> Self {
+    pub fn new(params: SwapServerParams<C, CF, CR, L, P, R, RP, F>) -> Self {
         SwapServer {
             network: params.network,
             max_swap_amount_sat: params.max_swap_amount_sat,
@@ -118,6 +123,7 @@ where
             chain_filter_service: params.chain_filter_service,
             chain_repository: params.chain_repository,
             lightning_client: params.lightning_client,
+            random_provider: params.random_provider,
             swap_service: params.swap_service,
             swap_repository: params.swap_repository,
             fee_estimator: params.fee_estimator,
@@ -125,7 +131,7 @@ where
     }
 }
 #[tonic::async_trait]
-impl<C, CF, CR, L, P, R, F> Swapper for SwapServer<C, CF, CR, L, P, R, F>
+impl<C, CF, CR, L, P, R, RP, F> Swapper for SwapServer<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient + Debug + Send + Sync + 'static,
     CF: ChainFilterService + Debug + Send + Sync + 'static,
@@ -133,6 +139,7 @@ where
     L: LightningClient + Debug + Send + Sync + 'static,
     P: PrivateKeyProvider + Debug + Send + Sync + 'static,
     R: SwapRepository + Debug + Send + Sync + 'static,
+    RP: RandomProvider + Debug + Send + Sync + 'static,
     F: FeeEstimator + Debug + Send + Sync + 'static,
 {
     #[instrument(skip(self), level = "debug")]
@@ -161,6 +168,8 @@ where
                 error!("failed to create swap: {:?}", e);
                 Status::internal("internal error")
             })?;
+
+        // TODO: These need to go in a transaction.
         self.chain_repository
             .add_watch_address(&swap.public.address)
             .await?;
@@ -360,10 +369,10 @@ where
         let label = format!("{}-{}", hash, unix_ns_now);
         match self
             .swap_repository
-            .lock_swap(&swap_state.swap, LockType::Pay)
+            .lock_swap_payment(&swap_state.swap, &label)
             .await
         {
-            Ok(_) => {}
+            Ok(_) => debug!("locked swap for payment"),
             Err(LockSwapError::AlreadyLocked) => {
                 return Err(Status::failed_precondition("swap is locked"))
             }
@@ -424,7 +433,10 @@ where
             }
         };
 
-        let _ = self.swap_repository.unlock_swap(&swap_state.swap).await;
+        let _ = self
+            .swap_repository
+            .unlock_swap_payment(&swap_state.swap, &label)
+            .await;
         let response = match pay_result {
             PaymentResult::Success { preimage: _ } => {
                 info!(
@@ -523,16 +535,18 @@ where
                 Status::internal("internal error")
             })?;
 
+        let refund_id = hex::encode(self.random_provider.rnd_32()?);
+
         // Ensure this swap is not used for paying out at the moment, also
         // prevent payouts from happening in the future. Note this will never be
         // unlocked, because the user may steal funds if it's ever paid out. The
         // user _can_ create a new refund later, however.
-        let was_locked = match self
+        match self
             .swap_repository
-            .lock_swap(&swap.swap, LockType::Refund)
+            .lock_swap_refund(&swap.swap, &refund_id)
             .await
         {
-            Ok(old_lock_type) => old_lock_type.is_some(),
+            Ok(_) => debug!("locked swap for refund."),
             Err(LockSwapError::AlreadyLocked) => {
                 return Err(Status::failed_precondition("swap is locked"))
             }
@@ -549,18 +563,18 @@ where
         {
             Ok(false) => {}
             Ok(true) => {
-                if !was_locked {
-                    let _ = self.swap_repository.unlock_swap(&swap.swap).await;
-                }
-
+                let _ = self
+                    .swap_repository
+                    .unlock_swap_refund(&swap.swap, &refund_id)
+                    .await;
                 return Err(Status::failed_precondition("swap is locked"));
             }
             Err(e) => {
                 error!("failed to check for pending or complete payment: {:?}", e);
-                if !was_locked {
-                    let _ = self.swap_repository.unlock_swap(&swap.swap).await;
-                }
-
+                let _ = self
+                    .swap_repository
+                    .unlock_swap_refund(&swap.swap, &refund_id)
+                    .await;
                 return Err(Status::internal("internal error"));
             }
         }
@@ -667,5 +681,12 @@ impl From<ChainRepositoryError> for Status {
                 Status::internal("internal error")
             }
         }
+    }
+}
+
+impl From<RandomError> for Status {
+    fn from(value: RandomError) -> Self {
+        error!("random error: {:?}", value);
+        Status::unknown("internal error")
     }
 }

@@ -11,15 +11,15 @@ use bitcoin::{
     Address, Network, OutPoint, ScriptBuf,
 };
 use futures::TryStreamExt;
-use sqlx::{postgres::PgRow, PgPool, Row};
+use sqlx::{postgres::PgRow, Executor, PgPool, Postgres, Row};
 use tracing::instrument;
 
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, LockSwapError, LockType,
-        PaidOutpoint, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData,
-        SwapState, SwapStatePaidOutpoints,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, LockSwapError, PaidOutpoint,
+        PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
+        SwapStatePaidOutpoints,
     },
 };
 
@@ -357,59 +357,125 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(result)
     }
 
-    async fn lock_swap(
+    async fn lock_swap_payment(
         &self,
         swap: &Swap,
-        lock_type: LockType,
-    ) -> Result<Option<LockType>, LockSwapError> {
+        payment_label: &str,
+    ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        let extra_where = match lock_type {
-            LockType::Pay => "",
-            LockType::Refund => " OR locked = $2",
-        };
-        let query = format!("
-            UPDATE swaps x
-            SET    locked = $2
-            FROM  (SELECT payment_hash, locked FROM swaps WHERE payment_hash = $1 AND locked IS NULL{} FOR UPDATE) y 
-            WHERE  x.payment_hash = y.payment_hash
-            RETURNING y.locked AS old_locked", extra_where);
+        lock_swap_for_update(swap, &mut *tx).await?;
 
-        let lock_type: i32 = lock_type.into();
-        let maybe_row = sqlx::query(&query)
-            .bind(swap.public.hash.as_byte_array().to_vec())
-            .bind(lock_type)
-            .fetch_optional(&mut *tx)
-            .await?;
+        // Payments can only be locked if there is no refund lock and no other payment lock.
+        let count: i64 = sqlx::query(
+            "SELECT COUNT(*)
+             FROM swap_locks 
+             WHERE swap_payment_hash = $1",
+        )
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .fetch_one(&mut *tx)
+        .await?
+        .try_get(0)?;
+        if count > 0 {
+            return Err(LockSwapError::AlreadyLocked);
+        }
 
-        let row = match maybe_row {
-            Some(row) => row,
-            None => return Err(LockSwapError::AlreadyLocked),
-        };
+        sqlx::query(
+            "INSERT INTO swap_locks (swap_payment_hash, payment_attempt_label)
+             VALUES($1, $2)",
+        )
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(payment_label)
+        .execute(&mut *tx)
+        .await?;
 
-        let old_lock_type: Option<i32> = row.try_get(0)?;
-        let old_lock_type: Option<LockType> = match old_lock_type {
-            Some(old_lock_type) => Some(old_lock_type.try_into()?),
-            None => None,
-        };
         tx.commit().await?;
-        Ok(old_lock_type)
-    }
-
-    async fn unlock_swap(&self, swap: &Swap) -> Result<(), LockSwapError> {
-        let query = String::from(
-            "
-            UPDATE swaps 
-            SET locked = NULL 
-            WHERE payment_hash = $1",
-        );
-
-        sqlx::query(&query)
-            .bind(swap.public.hash.as_byte_array().to_vec())
-            .execute(&*self.pool)
-            .await?;
-
         Ok(())
     }
+
+    async fn lock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError> {
+        let mut tx = self.pool.begin().await?;
+        lock_swap_for_update(swap, &mut *tx).await?;
+
+        // Refunds can be locked with another refund lock, but not with a payment lock.
+        let count: i64 = sqlx::query(
+            "SELECT COUNT(*)
+             FROM swap_locks 
+             WHERE swap_payment_hash = $1 AND payment_attempt_label IS NOT NULL",
+        )
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .fetch_one(&mut *tx)
+        .await?
+        .try_get(0)?;
+        if count > 0 {
+            return Err(LockSwapError::AlreadyLocked);
+        }
+
+        sqlx::query(
+            "INSERT INTO swap_locks (swap_payment_hash, refund_id)
+             VALUES($1, $2)",
+        )
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(refund_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn unlock_swap_payment(
+        &self,
+        swap: &Swap,
+        payment_label: &str,
+    ) -> Result<(), LockSwapError> {
+        let mut tx = self.pool.begin().await?;
+        lock_swap_for_update(swap, &mut *tx).await?;
+
+        sqlx::query(
+            "DELETE FROM swap_locks
+             WHERE swap_payment_hash = $1 AND payment_attempt_label = $2",
+        )
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(payment_label)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn unlock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError> {
+        let mut tx = self.pool.begin().await?;
+        lock_swap_for_update(swap, &mut *tx).await?;
+
+        sqlx::query(
+            "DELETE FROM swap_locks
+             WHERE swap_payment_hash = $1 AND refund_id = $2",
+        )
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(refund_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+async fn lock_swap_for_update<'c, E>(swap: &Swap, executor: E) -> Result<(), LockSwapError>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    // Take a lock on the swap hash, so simultaneous locks will wait.
+    let locked_swap_row = sqlx::query("SELECT * FROM swaps WHERE payment_hash = $1 FOR UPDATE")
+        .bind(swap.public.hash.as_byte_array().to_vec())
+        .fetch_optional(executor)
+        .await?;
+    if locked_swap_row.is_none() {
+        return Err(LockSwapError::SwapNotFound);
+    }
+
+    Ok(())
 }
 
 fn swap_state_fields(prefix: &str) -> String {

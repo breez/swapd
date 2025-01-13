@@ -12,7 +12,7 @@ use postgresql::LndRepository;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use reqwest::Url;
 use sqlx::{PgPool, Pool, Postgres};
-use swap::{RandomPrivateKeyProvider, SwapService};
+use swap::{RandomPrivateKeyProvider, RingRandomProvider, SwapService};
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Certificate, Identity, Server, Uri};
@@ -293,7 +293,8 @@ async fn run_with_client<T>(
 where
     T: LightningClient + Wallet + Send + Sync + Debug + 'static,
 {
-    let privkey_provider = RandomPrivateKeyProvider::new();
+    let random_provider = Arc::new(RingRandomProvider::new());
+    let privkey_provider = RandomPrivateKeyProvider::new(Arc::clone(&random_provider));
     let swap_service = Arc::new(SwapService::new(
         args.network,
         privkey_provider,
@@ -429,6 +430,7 @@ where
             chain_filter_service: Arc::clone(&chain_filter),
             chain_repository: Arc::clone(&chain_repository),
             lightning_client: Arc::clone(&lightning_client),
+            random_provider: Arc::clone(&random_provider),
             swap_service: Arc::clone(&swap_service),
             swap_repository: Arc::clone(&swap_repository),
             fee_estimator: Arc::clone(&fee_estimator),

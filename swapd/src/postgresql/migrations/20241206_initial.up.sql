@@ -10,7 +10,6 @@ CREATE TABLE swaps (
     claim_script BYTEA NOT NULL,
     creation_time BIGINT NOT NULL,
     lock_height BIGINT NOT NULL,
-    locked INTEGER NULL,
     payment_hash BYTEA NOT NULL PRIMARY KEY,
     preimage BYTEA NULL,
     refund_pubkey BYTEA NOT NULL,
@@ -46,6 +45,14 @@ CREATE INDEX payment_attempt_tx_outputs_payment_attempt_id_idx
 ON payment_attempt_tx_outputs (payment_attempt_id);
 CREATE INDEX payment_attempt_tx_outputs_tx_id_output_index_idx
 ON payment_attempt_tx_outputs (tx_id, output_index);
+
+-- Swaps are locked on refund or on payment.
+CREATE TABLE swap_locks (
+    id BIGSERIAL PRIMARY KEY,
+    swap_payment_hash BYTEA NOT NULL REFERENCES swaps,
+    refund_id VARCHAR NULL,
+    payment_attempt_label VARCHAR NULL
+);
 
 /*
     chain
