@@ -1,10 +1,12 @@
 use bitcoin::hashes::sha256;
+use lightning_invoice::Bolt11Invoice;
 use tonic::Status;
 
 #[derive(Debug)]
 pub enum LightningError {
     ConnectionFailed,
     InvalidPreimage,
+    NoRoute,
     General(Status),
 }
 
@@ -30,12 +32,19 @@ pub struct PreimageResult {
     pub label: String,
 }
 
+#[derive(Debug)]
+pub struct Route {
+    // The total delay over the route.
+    pub delay: u32,
+}
+
 #[async_trait::async_trait]
 pub trait LightningClient {
     async fn get_preimage(
         &self,
         hash: sha256::Hash,
     ) -> Result<Option<PreimageResult>, LightningError>;
+    async fn get_route(&self, bolt11: &Bolt11Invoice) -> Result<Route, LightningError>;
     async fn has_pending_or_complete_payment(
         &self,
         hash: &sha256::Hash,

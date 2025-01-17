@@ -34,7 +34,10 @@ message CreateSwapResponse {
     // Absolute blockheight after which the swap has expired, and is eligible
     // for unilateral refund.
     uint32 lock_height = 3;
-    SwapParameters parameters = 4;
+
+    // Expected last block height where a payout is still possible.
+    uint32 expected_last_payout_height = 4;
+    SwapParameters parameters = 5;
 }
 
 message PaySwapRequest {

@@ -4,6 +4,7 @@ use bitcoin::{
     hashes::{sha256, Hash},
     Network,
 };
+use lightning_invoice::Bolt11Invoice;
 use thiserror::Error;
 use tonic::{
     metadata::{errors::InvalidMetadataValue, Ascii, MetadataValue},
@@ -13,11 +14,12 @@ use tonic::{
 };
 use tracing::{error, field, instrument, trace, trace_span, warn};
 
-use crate::lightning::{LightningError, PaymentResult, PreimageResult};
+use crate::lightning::{LightningError, PaymentResult, PreimageResult, Route};
 
 use super::{
     lnrpc::{
         htlc_attempt::HtlcStatus, lightning_client::LightningClient, payment::PaymentStatus, Hop,
+        HopHint, QueryRoutesRequest, RouteHint,
     },
     routerrpc::{router_client::RouterClient, SendPaymentRequest, TrackPaymentRequest},
     Repository, RepositoryError,
@@ -187,6 +189,45 @@ where
             .await?
             .unwrap_or(String::from(""));
         Ok(Some(PreimageResult { preimage, label }))
+    }
+
+    async fn get_route(&self, bolt11: &Bolt11Invoice) -> Result<Route, LightningError> {
+        let mut client = self.get_client().await?;
+        let resp = client
+            .query_routes(QueryRoutesRequest {
+                amt_msat: 100_000,
+                final_cltv_delta: 0,
+                time_pref: 1.0,
+                pub_key: bolt11.get_payee_pub_key().to_string(),
+                route_hints: bolt11
+                    .route_hints()
+                    .into_iter()
+                    .map(|hint| RouteHint {
+                        hop_hints: hint
+                            .0
+                            .into_iter()
+                            .map(|hop| HopHint {
+                                chan_id: hop.short_channel_id,
+                                cltv_expiry_delta: hop.cltv_expiry_delta as u32,
+                                fee_base_msat: hop.fees.base_msat,
+                                fee_proportional_millionths: hop.fees.proportional_millionths,
+                                node_id: hop.src_node_id.to_string(),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .await?
+            .into_inner();
+        let maybe_route = resp.routes.first();
+        let route = match maybe_route {
+            Some(route) => route,
+            None => return Err(LightningError::NoRoute),
+        };
+        Ok(Route {
+            delay: route.total_time_lock,
+        })
     }
 
     #[instrument(level = "trace", skip(self))]

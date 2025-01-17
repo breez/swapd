@@ -41,6 +41,9 @@ pub mod swap_api {
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];
 const MIN_SWAP_AMOUNT_CONF_TARGET: i32 = 12;
+const DEFAULT_ROUTE_CLTV: u32 = 80;
+const PAYOUT_ADDITIONAL_CLTV: u32 = 3;
+
 pub struct SwapServerParams<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient,
@@ -183,6 +186,13 @@ where
             trace!("got invoice with invalid signature: {:?}", e);
             return Err(Status::invalid_argument("invalid invoice"));
         }
+        let min_final_cltv_expiry_delta: u32 = invoice
+            .min_final_cltv_expiry_delta()
+            .try_into()
+            .map_err(|_| {
+                trace!("got too large min_final_cltv_expiry_delta");
+                Status::invalid_argument("invalid invoice")
+            })?;
         let destination = invoice.get_payee_pub_key();
 
         let current_height = self.chain_client.get_blockheight().await?;
@@ -206,10 +216,23 @@ where
             "new swap created"
         );
 
+        let route_delay = match self.lightning_client.get_route(&invoice).await {
+            Ok(route) => route.delay,
+            Err(LightningError::NoRoute) => DEFAULT_ROUTE_CLTV,
+            Err(_) => DEFAULT_ROUTE_CLTV,
+        };
         let parameters = self.get_swap_parameters().await?;
+
         Ok(Response::new(CreateSwapResponse {
             address: swap.public.address.to_string(),
             claim_pubkey: swap.public.claim_pubkey.serialize().to_vec(),
+            expected_last_payout_height: swap
+                .public
+                .lock_height
+                .saturating_sub(min_final_cltv_expiry_delta)
+                .saturating_sub(route_delay)
+                .saturating_sub(self.min_claim_blocks)
+                .saturating_sub(PAYOUT_ADDITIONAL_CLTV),
             lock_height: swap.public.lock_height,
             parameters: Some(parameters),
         }))

@@ -3,6 +3,7 @@ use bitcoin::{
     Network,
 };
 use futures::{future::join_all, stream::FuturesUnordered, StreamExt};
+use lightning_invoice::Bolt11Invoice;
 use regex::Regex;
 use thiserror::Error;
 use tokio::join;
@@ -13,12 +14,12 @@ use tonic::{
 use tracing::{debug, error, instrument, warn};
 
 use crate::lightning::{
-    LightningClient, LightningError, PaymentRequest, PaymentResult, PreimageResult,
+    LightningClient, LightningError, PaymentRequest, PaymentResult, PreimageResult, Route,
 };
 
 use super::cln_api::{
     listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus,
-    Amount, ListpaysRequest, ListsendpaysRequest, PayRequest, WaitsendpayRequest,
+    Amount, GetrouteRequest, ListpaysRequest, ListsendpaysRequest, PayRequest, WaitsendpayRequest,
 };
 
 pub struct ClientConnection {
@@ -95,6 +96,69 @@ impl LightningClient for Client {
         };
 
         Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn get_route(&self, bolt11: &Bolt11Invoice) -> Result<Route, LightningError> {
+        let mut client = self.get_client().await?;
+
+        // Try getting a route without hints first.
+        let resp = client
+            .get_route(GetrouteRequest {
+                amount_msat: Some(Amount {
+                    msat: bolt11.amount_milli_satoshis().unwrap_or(100_000),
+                }),
+                cltv: Some(0),
+                fuzzpercent: Some(0),
+                maxhops: None,
+                exclude: Vec::new(),
+                fromid: None,
+                id: bolt11.get_payee_pub_key().serialize().to_vec(),
+                riskfactor: 100,
+            })
+            .await?
+            .into_inner();
+
+        if let Some(hop) = resp.route.first() {
+            return Ok(Route { delay: hop.delay });
+        }
+
+        for hint in bolt11.route_hints() {
+            let first_hop = match hint.0.first() {
+                Some(hop) => hop,
+                None => continue,
+            };
+
+            let resp = client
+                .get_route(GetrouteRequest {
+                    amount_msat: Some(Amount {
+                        msat: bolt11.amount_milli_satoshis().unwrap_or(100_000),
+                    }),
+                    cltv: Some(0),
+                    fuzzpercent: Some(0),
+                    maxhops: None,
+                    exclude: Vec::new(),
+                    fromid: None,
+                    id: first_hop.src_node_id.serialize().to_vec(),
+                    riskfactor: 100,
+                })
+                .await?
+                .into_inner();
+
+            let first_hop = match resp.route.first() {
+                Some(hop) => hop,
+                None => continue,
+            };
+
+            let mut delay = first_hop.delay;
+            for hop in hint.0 {
+                delay += hop.cltv_expiry_delta as u32
+            }
+
+            return Ok(Route { delay });
+        }
+
+        Err(LightningError::NoRoute)
     }
 
     #[instrument(level = "trace", skip(self))]
