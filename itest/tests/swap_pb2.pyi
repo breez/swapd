@@ -10,13 +10,18 @@ from typing import (
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class CreateSwapRequest(_message.Message):
-    __slots__ = ("hash", "refund_pubkey")
+    __slots__ = ("hash", "refund_pubkey", "invoice")
     HASH_FIELD_NUMBER: _ClassVar[int]
     REFUND_PUBKEY_FIELD_NUMBER: _ClassVar[int]
+    INVOICE_FIELD_NUMBER: _ClassVar[int]
     hash: bytes
     refund_pubkey: bytes
+    invoice: str
     def __init__(
-        self, hash: _Optional[bytes] = ..., refund_pubkey: _Optional[bytes] = ...
+        self,
+        hash: _Optional[bytes] = ...,
+        refund_pubkey: _Optional[bytes] = ...,
+        invoice: _Optional[str] = ...,
     ) -> None: ...
 
 class CreateSwapResponse(_message.Message):
