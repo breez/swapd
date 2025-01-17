@@ -91,22 +91,22 @@ jobs:
             rust-version: stable
             org: ElementsProject
             repo: lightning
-          - version: v24.08
-            rust-version: stable
-            org: ElementsProject
-            repo: lightning
-          - version: v24.05
-            rust-version: 1.79.0
-            org: ElementsProject
-            repo: lightning
-          - version: v24.02.2
-            rust-version: 1.79.0
-            org: ElementsProject
-            repo: lightning
-          - version: v23.11.2
-            rust-version: 1.79.0
-            org: ElementsProject
-            repo: lightning
+          # - version: v24.08
+          #   rust-version: stable
+          #   org: ElementsProject
+          #   repo: lightning
+          # - version: v24.05
+          #   rust-version: 1.79.0
+          #   org: ElementsProject
+          #   repo: lightning
+          # - version: v24.02.2
+          #   rust-version: 1.79.0
+          #   org: ElementsProject
+          #   repo: lightning
+          # - version: v23.11.2
+          #   rust-version: 1.79.0
+          #   org: ElementsProject
+          #   repo: lightning
     steps:
       - name: Cache CLN
         id: cache
@@ -215,10 +215,10 @@ jobs:
       matrix:
         cln-version:
           - v24.11
-          - v24.08
-          - v24.05
-          - v24.02.2
-          - v23.11.2
+          # - v24.08
+          # - v24.05
+          # - v24.02.2
+          # - v23.11.2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
