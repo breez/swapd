@@ -25,20 +25,29 @@ class CreateSwapRequest(_message.Message):
     ) -> None: ...
 
 class CreateSwapResponse(_message.Message):
-    __slots__ = ("address", "claim_pubkey", "lock_height", "parameters")
+    __slots__ = (
+        "address",
+        "claim_pubkey",
+        "lock_height",
+        "expected_last_payout_height",
+        "parameters",
+    )
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
     CLAIM_PUBKEY_FIELD_NUMBER: _ClassVar[int]
     LOCK_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_LAST_PAYOUT_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     PARAMETERS_FIELD_NUMBER: _ClassVar[int]
     address: str
     claim_pubkey: bytes
     lock_height: int
+    expected_last_payout_height: int
     parameters: SwapParameters
     def __init__(
         self,
         address: _Optional[str] = ...,
         claim_pubkey: _Optional[bytes] = ...,
         lock_height: _Optional[int] = ...,
+        expected_last_payout_height: _Optional[int] = ...,
         parameters: _Optional[_Union[SwapParameters, _Mapping]] = ...,
     ) -> None: ...
 
