@@ -9,32 +9,53 @@ service Swapper {
 }
 
 message CreateSwapRequest {
+    // Hash for the HTLC. Client should have the preimage to this hash.
     bytes hash = 1;
+
+    // Public key used for unilateral refunds and cooperative spends.
     bytes refund_pubkey = 2;
 }
   
 message CreateSwapResponse {
+    // Funds sent to this address will be swapped over lightning.
     string address = 1;
+
+    // The swap server's public key for claiming the onchain funds after payout.
+    // The server side key for cooperative spends.
     bytes claim_pubkey = 2;
+
+    // Absolute blockheight after which the swap has expired, and is eligible
+    // for unilateral refund.
     uint32 lock_height = 3;
     SwapParameters parameters = 4;
 }
 
 message PaySwapRequest {
+    // Payment request to payout the swap funds over lightning.
     string payment_request = 1;
 }
 
 message PaySwapResponse {}
 
 message RefundSwapRequest {
+    // Which address to refund.
     string address = 1;
+
+    // The refund transaction.
     bytes transaction = 2;
+
+    // The input in the refund transaction spending from the swap address. 
     uint32 input_index = 3;
+
+    // Client's pub nonce used for the musig2 signature.
     bytes pub_nonce = 4;
 }
 
 message RefundSwapResponse {
+    // Server's pub nonce used for the musig2 signature.
     bytes pub_nonce = 1;
+
+    // Server's partial musig2 signature.
     bytes partial_signature = 2;
 }
 
