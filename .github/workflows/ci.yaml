@@ -275,7 +275,7 @@ jobs:
       matrix:
         test:
           - lnd-version: jssdwt-v0.18.3-with-ca
-            cln-version: v24.08
+            cln-version: v24.11
     steps:
       - name: Checkout
         uses: actions/checkout@v4
