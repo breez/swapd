@@ -59,7 +59,8 @@ def create_swap_no_invoice_extended(user: ClnNode, swapper: SwapdServer):
     h = hashlib.sha256(preimage).digest()
     refund_privkey = PrivateKey()
     refund_pubkey = refund_privkey.get_public_key().to_hex()
-    create_swap_resp = swapper.rpc.create_swap(user, refund_pubkey, h)
+    invoice = user.create_invoice(10000, "fake swap invoice")
+    create_swap_resp = swapper.rpc.create_swap(user, refund_pubkey, h, invoice)
     return (
         create_swap_resp.address,
         preimage.hex(),

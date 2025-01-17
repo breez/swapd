@@ -283,10 +283,12 @@ class SwapperGrpc(object):
         self.channel = grpc.insecure_channel(f"{host}:{port}")
         self.stub = SwapperStub(self.channel)
 
-    def create_swap(self, lightning_node, refund_pubkey, hash):
+    def create_swap(self, lightning_node, refund_pubkey, hash, invoice):
         node_id = lightning_node.info["id"]
         payload = swap_pb2.CreateSwapRequest(
-            hash=hash, refund_pubkey=bytes.fromhex(refund_pubkey)
+            hash=hash,
+            refund_pubkey=bytes.fromhex(refund_pubkey),
+            invoice=invoice,
         )
         return self.stub.CreateSwap(payload)
 
