@@ -14,6 +14,13 @@ message CreateSwapRequest {
 
     // Public key used for unilateral refunds and cooperative spends.
     bytes refund_pubkey = 2;
+
+    // Any invoice to the client's node. This invoice is used to ensure the
+    // destination for the swap payout is the same as on swap creation. The
+    // invoice should have equivalent values for routing hints and 
+    // min_final_cltv_expiry_delta as the eventual invoice used for payout, so
+    // the swap server can give a good estimate of fees and timeouts. 
+    string invoice = 3;
 }
   
 message CreateSwapResponse {
