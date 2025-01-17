@@ -176,7 +176,6 @@ where
             Status::invalid_argument("invalid hash")
         })?;
 
-        // Get a fee estimate for the next block to account for worst case fees.
         let current_height = self.chain_client.get_blockheight().await?;
 
         let swap = self
