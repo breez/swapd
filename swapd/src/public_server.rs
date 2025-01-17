@@ -289,6 +289,10 @@ where
 
         let hash = invoice.payment_hash();
         let swap_state = self.swap_repository.get_swap_by_hash(hash).await?;
+        if swap_state.swap.destination != invoice.get_payee_pub_key() {
+            return Err(Status::invalid_argument("invalid destination"));
+        }
+
         if swap_state.preimage.is_some() {
             trace!("swap already had preimage");
             return Err(Status::failed_precondition("swap already paid"));
