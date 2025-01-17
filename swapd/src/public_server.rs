@@ -175,12 +175,21 @@ where
             trace!("got invalid hash");
             Status::invalid_argument("invalid hash")
         })?;
+        let invoice: Bolt11Invoice = req.invoice.parse().map_err(|_| {
+            trace!("got invalid invoice");
+            Status::invalid_argument("invalid invoice")
+        })?;
+        if let Err(e) = invoice.check_signature() {
+            trace!("got invoice with invalid signature: {:?}", e);
+            return Err(Status::invalid_argument("invalid invoice"));
+        }
+        let destination = invoice.get_payee_pub_key();
 
         let current_height = self.chain_client.get_blockheight().await?;
 
         let swap = self
             .swap_service
-            .create_swap(payer_pubkey, hash, current_height)
+            .create_swap(payer_pubkey, hash, current_height, destination)
             .map_err(|e| {
                 error!("failed to create swap: {:?}", e);
                 Status::internal("internal error")

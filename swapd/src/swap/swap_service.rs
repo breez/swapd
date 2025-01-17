@@ -45,6 +45,7 @@ impl SwapState {
 #[derive(Clone, Debug)]
 pub struct Swap {
     pub creation_time: SystemTime,
+    pub destination: PublicKey,
     pub public: SwapPublicData,
     pub private: SwapPrivateData,
 }
@@ -143,6 +144,7 @@ where
         refund_pubkey: PublicKey,
         hash: sha256::Hash,
         current_height: u64,
+        destination: PublicKey,
     ) -> Result<Swap, SwapError> {
         let creation_time = SystemTime::now();
         let claim_privkey = self.privkey_provider.new_private_key()?;
@@ -175,6 +177,7 @@ where
         );
         let mut swap = Swap {
             creation_time,
+            destination,
             public: SwapPublicData {
                 address: fake_address,
                 claim_pubkey,

@@ -40,6 +40,7 @@ impl SwapRepository {
         let claim_pubkey: Vec<u8> = row.try_get("claim_pubkey")?;
         let claim_script: Vec<u8> = row.try_get("claim_script")?;
         let creation_time: i64 = row.try_get("creation_time")?;
+        let destination: Vec<u8> = row.try_get("destination")?;
         let lock_height: i64 = row.try_get("lock_height")?;
         let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
         let refund_pubkey: Vec<u8> = row.try_get("refund_pubkey")?;
@@ -53,6 +54,7 @@ impl SwapRepository {
             .require_network(self.network)?;
         let swap = Swap {
             creation_time,
+            destination: PublicKey::from_slice(&destination)?,
             public: SwapPublicData {
                 address: address.clone(),
                 claim_pubkey: PublicKey::from_slice(&claim_pubkey)?,
@@ -91,17 +93,19 @@ impl crate::swap::SwapRepository for SwapRepository {
                ,                  claim_pubkey
                ,                  claim_script
                ,                  creation_time
+               ,                  destination
                ,                  lock_height
                ,                  payment_hash
                ,                  refund_pubkey
                ,                  refund_script
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
         )
         .bind(swap.public.address.to_string())
         .bind(swap.private.claim_privkey.secret_bytes().to_vec())
         .bind(swap.public.claim_pubkey.serialize())
         .bind(swap.public.claim_script.as_bytes())
         .bind(swap.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+        .bind(swap.destination.serialize())
         .bind(swap.public.lock_height as i64)
         .bind(swap.public.hash.as_byte_array().to_vec())
         .bind(swap.public.refund_pubkey.serialize())
