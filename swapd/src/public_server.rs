@@ -186,11 +186,10 @@ where
                 Status::internal("internal error")
             })?;
 
-        // TODO: These need to go in a transaction.
+        self.swap_repository.add_swap(&swap).await?;
         self.chain_repository
             .add_watch_address(&swap.public.address)
             .await?;
-        self.swap_repository.add_swap(&swap).await?;
 
         info!(
             hash = field::display(&hash),
