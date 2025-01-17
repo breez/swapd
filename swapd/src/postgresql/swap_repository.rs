@@ -489,6 +489,7 @@ fn swap_state_fields(prefix: &str) -> String {
          , {0}.claim_pubkey
          , {0}.claim_script
          , {0}.creation_time
+         , {0}.destination
          , {0}.lock_height
          , {0}.payment_hash
          , {0}.preimage
