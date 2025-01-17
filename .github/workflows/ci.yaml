@@ -125,7 +125,8 @@ jobs:
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get install -y libffi-dev zlib1g-dev libsodium-dev gettext
+          sudo apt-get install -y \
+          libffi-dev zlib1g-dev libsodium-dev gettext libsqlite3-dev
 
       - name: Set up Python 3.8
         if: steps.cache.outputs.cache-hit != 'true'
@@ -254,6 +255,7 @@ jobs:
         run: |
           chmod +x -R inst/
           sudo cp -a inst/usr/local/. /usr/local/
+          sudo apt install sqlite3
 
       - name: Install virtualenv
         run: python -m pip install --user virtualenv
@@ -322,6 +324,7 @@ jobs:
         run: |
           chmod +x -R inst/
           sudo cp -a inst/usr/local/. /usr/local/
+          sudo apt install sqlite3 
 
       - name: Install virtualenv
         run: python -m pip install --user virtualenv
