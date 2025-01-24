@@ -73,7 +73,7 @@ struct Args {
     /// a script with an absolute locktime which is the current height + lock
     /// time.
     #[arg(long, default_value = "1008")]
-    pub lock_time: u32,
+    pub lock_time: u16,
 
     /// Minimum number of confirmations required before a swap is eligible for
     /// payout.

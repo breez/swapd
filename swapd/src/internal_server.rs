@@ -259,14 +259,14 @@ where
         Ok(Response::new(ListClaimableResponse {
             claimables: claimables
                 .into_iter()
-                .map(|r| ClaimableUtxo {
-                    outpoint: r.utxo.outpoint.to_string(),
-                    swap_hash: r.swap.public.hash.to_string(),
-                    lock_height: r.swap.public.lock_height,
-                    confirmation_height: r.utxo.block_height,
-                    block_hash: r.utxo.block_hash.to_string(),
-                    blocks_left: r.swap.blocks_left(current_height),
-                    paid_with_request: r.paid_with_request,
+                .map(|c| ClaimableUtxo {
+                    outpoint: c.utxo.outpoint.to_string(),
+                    swap_hash: c.swap.public.hash.to_string(),
+                    lock_time: c.swap.public.lock_time.into(),
+                    confirmation_height: c.utxo.block_height,
+                    block_hash: c.utxo.block_hash.to_string(),
+                    blocks_left: c.blocks_left(current_height),
+                    paid_with_request: c.paid_with_request,
                 })
                 .collect(),
         }))
@@ -284,7 +284,7 @@ where
             let outpoint: OutPoint = outpoint
                 .parse()
                 .map_err(|_| Status::invalid_argument(format!("invalid outpoint {}", outpoint)))?;
-            let claimable = match all_claimables.iter().find(|r| r.utxo.outpoint == outpoint) {
+            let claimable = match all_claimables.iter().find(|c| c.utxo.outpoint == outpoint) {
                 Some(claimable) => claimable,
                 None => {
                     return Err(Status::invalid_argument(format!(
@@ -299,7 +299,7 @@ where
         let current_height = self.chain_client.get_blockheight().await?;
         let min_blocks_left = match claimables
             .iter()
-            .map(|r| r.swap.blocks_left(current_height))
+            .map(|c| c.blocks_left(current_height))
             .min()
         {
             Some(m) => m,

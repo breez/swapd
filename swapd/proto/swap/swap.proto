@@ -16,7 +16,7 @@ message CreateSwapRequest {
 message CreateSwapResponse {
     string address = 1;
     bytes claim_pubkey = 2;
-    uint32 lock_height = 3;
+    uint32 lock_time = 3;
     SwapParameters parameters = 4;
 }
 
@@ -39,10 +39,9 @@ message RefundSwapResponse {
 }
 
 message SwapParameters {
-    uint32 lock_time = 1;
-    uint64 max_swap_amount_sat = 2;
-    uint64 min_swap_amount_sat = 3;
-    uint64 min_utxo_amount_sat = 4;
+    uint64 max_swap_amount_sat = 1;
+    uint64 min_swap_amount_sat = 2;
+    uint64 min_utxo_amount_sat = 3;
 }
 
 message SwapParametersRequest {}

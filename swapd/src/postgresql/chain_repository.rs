@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use bitcoin::{address::NetworkUnchecked, Address, Amount, BlockHash, Network, OutPoint, TxOut};
 use futures::TryStreamExt;
-use sqlx::{PgConnection, PgPool, Row};
+use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use tracing::instrument;
 
-use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentTxo, Utxo};
+use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentTxo, Txo};
 
 #[derive(Debug)]
 pub struct ChainRepository {
@@ -61,6 +61,23 @@ impl ChainRepository {
         .await?;
 
         Ok(())
+    }
+
+    async fn map_txo(&self, address: &Address, row: &PgRow) -> Result<Txo, ChainRepositoryError> {
+        let tx_id: String = row.try_get("tx_id")?;
+        let output_index: i64 = row.try_get("output_index")?;
+        let amount: i64 = row.try_get("amount")?;
+        let block_hash: String = row.try_get("block_hash")?;
+        let height: i64 = row.try_get("height")?;
+        Ok(Txo {
+            block_hash: block_hash.parse()?,
+            block_height: height as u64,
+            outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
+            tx_out: TxOut {
+                value: Amount::from_sat(amount as u64),
+                script_pubkey: address.script_pubkey(),
+            },
+        })
     }
 
     #[instrument(level = "trace", skip(self))]
@@ -269,6 +286,34 @@ impl chain::ChainRepository for ChainRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
+    async fn get_txos_for_address(
+        &self,
+        address: &Address,
+    ) -> Result<Vec<Txo>, ChainRepositoryError> {
+        let mut rows = sqlx::query(
+            r#"SELECT o.tx_id
+            ,         o.output_index
+            ,         o.amount
+            ,         b.block_hash
+            ,         b.height
+            FROM tx_outputs o
+            INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
+            INNER JOIN blocks b ON tb.block_hash = b.block_hash
+            WHERE address = $1
+            ORDER BY b.height, o.tx_id, o.output_index"#,
+        )
+        .bind(address.to_string())
+        .fetch(&*self.pool);
+
+        let mut result: Vec<Txo> = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let txo = self.map_txo(address, &row).await?;
+            result.push(txo);
+        }
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError> {
         let mut rows = sqlx::query(
             r#"SELECT o.address
@@ -293,24 +338,10 @@ impl chain::ChainRepository for ChainRepository {
         let mut result: Vec<AddressUtxo> = Vec::new();
         while let Some(row) = rows.try_next().await? {
             let address: String = row.try_get("address")?;
-            let tx_id: String = row.try_get("tx_id")?;
-            let output_index: i64 = row.try_get("output_index")?;
-            let amount: i64 = row.try_get("amount")?;
-            let block_hash: String = row.try_get("block_hash")?;
-            let height: i64 = row.try_get("height")?;
             let address = address
                 .parse::<Address<NetworkUnchecked>>()?
                 .require_network(self.network)?;
-            let utxo = Utxo {
-                block_hash: block_hash.parse()?,
-                block_height: height as u64,
-                outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
-                tx_out: TxOut {
-                    value: Amount::from_sat(amount as u64),
-                    script_pubkey: address.script_pubkey(),
-                },
-            };
-
+            let utxo = self.map_txo(&address, &row).await?;
             result.push(AddressUtxo { address, utxo });
         }
         Ok(result)
@@ -320,7 +351,7 @@ impl chain::ChainRepository for ChainRepository {
     async fn get_utxos_for_address(
         &self,
         address: &Address,
-    ) -> Result<Vec<Utxo>, ChainRepositoryError> {
+    ) -> Result<Vec<Txo>, ChainRepositoryError> {
         let mut rows = sqlx::query(
             r#"SELECT o.tx_id
             ,         o.output_index
@@ -342,22 +373,9 @@ impl chain::ChainRepository for ChainRepository {
         .bind(address.to_string())
         .fetch(&*self.pool);
 
-        let mut result: Vec<Utxo> = Vec::new();
+        let mut result: Vec<Txo> = Vec::new();
         while let Some(row) = rows.try_next().await? {
-            let tx_id: String = row.try_get("tx_id")?;
-            let output_index: i64 = row.try_get("output_index")?;
-            let amount: i64 = row.try_get("amount")?;
-            let block_hash: String = row.try_get("block_hash")?;
-            let height: i64 = row.try_get("height")?;
-            let utxo = Utxo {
-                block_hash: block_hash.parse()?,
-                block_height: height as u64,
-                outpoint: OutPoint::new(tx_id.parse()?, output_index as u32),
-                tx_out: TxOut {
-                    value: Amount::from_sat(amount as u64),
-                    script_pubkey: address.script_pubkey(),
-                },
-            };
+            let utxo = self.map_txo(address, &row).await?;
             result.push(utxo);
         }
         Ok(result)

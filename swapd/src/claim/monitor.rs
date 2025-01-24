@@ -238,7 +238,7 @@ where
     ) -> Result<(), ClaimError> {
         let blocks_left = match claimables
             .iter()
-            .map(|r| r.swap.blocks_left(current_height))
+            .map(|r| r.blocks_left(current_height))
             .min()
         {
             Some(blocks_left) => blocks_left,
@@ -295,7 +295,7 @@ where
     ) -> Result<(), ClaimError> {
         let blocks_left = match claimables
             .iter()
-            .map(|r| r.swap.blocks_left(current_height))
+            .map(|r| r.blocks_left(current_height))
             .min()
         {
             Some(blocks_left) => blocks_left,

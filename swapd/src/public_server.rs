@@ -19,7 +19,7 @@ use tracing::{debug, error, field, info, instrument, trace, warn};
 use crate::{
     chain::{
         ChainClient, ChainError, ChainRepository, ChainRepositoryError, FeeEstimateError,
-        FeeEstimator, Utxo,
+        FeeEstimator, Txo,
     },
     chain_filter::ChainFilterService,
     lightning::{LightningClient, LightningError, PaymentRequest, PaymentResult},
@@ -141,7 +141,6 @@ where
         let min_utxo_amount_sat = (fee_estimate.sat_per_kw as u64) * 3 / 2;
 
         Ok(SwapParameters {
-            lock_time: self.swap_service.lock_time(),
             max_swap_amount_sat: self.max_swap_amount_sat,
             min_swap_amount_sat: min_utxo_amount_sat,
             min_utxo_amount_sat,
@@ -203,7 +202,7 @@ where
         Ok(Response::new(CreateSwapResponse {
             address: swap.public.address.to_string(),
             claim_pubkey: swap.public.claim_pubkey.serialize().to_vec(),
-            lock_height: swap.public.lock_height,
+            lock_time: swap.public.lock_time.into(),
             parameters: Some(parameters),
         }))
     }
@@ -264,14 +263,6 @@ where
             return Err(Status::failed_precondition("swap already paid"));
         }
 
-        let current_height = self.chain_client.get_blockheight().await?;
-        let blocks_left = match swap_state.blocks_left(current_height) {
-            blocks_left if blocks_left < 0 => {
-                return Err(Status::failed_precondition("swap expired"))
-            }
-            blocks_left => blocks_left as u32,
-        }
-        .saturating_sub(self.min_claim_blocks);
         let min_final_cltv_expiry_delta: u32 = invoice
             .min_final_cltv_expiry_delta()
             .try_into()
@@ -279,6 +270,34 @@ where
                 trace!("min_final_cltv_expiry_delta exceeds u32::MAX");
                 Status::invalid_argument("min_final_cltv_expiry_delta too high")
             })?;
+
+        let txos = self
+            .chain_repository
+            .get_txos_for_address(&swap_state.swap.public.address)
+            .await?;
+
+        if txos.is_empty() {
+            trace!("swap has no utxos");
+            return Err(Status::failed_precondition("no utxos found"));
+        }
+
+        let min_confirmation_height = match txos.iter().map(|txo| txo.block_height).min() {
+            Some(m) => m,
+            None => {
+                error!("swap had txos but no confirmations");
+                return Err(Status::failed_precondition("no utxos found"));
+            }
+        };
+
+        let current_height = self.chain_client.get_blockheight().await?;
+        let blocks_left = match swap_state.blocks_left(min_confirmation_height, current_height) {
+            blocks_left if blocks_left < 0 => {
+                return Err(Status::failed_precondition("swap expired"))
+            }
+            blocks_left => blocks_left as u32,
+        }
+        .saturating_sub(self.min_claim_blocks);
+
         if blocks_left == 0
             || blocks_left.saturating_sub(min_final_cltv_expiry_delta) < self.min_viable_cltv
         {
@@ -290,23 +309,13 @@ where
             return Err(Status::failed_precondition("swap expired"));
         }
 
-        let utxos = self
-            .chain_repository
-            .get_utxos_for_address(&swap_state.swap.public.address)
-            .await?;
-
-        if utxos.is_empty() {
-            trace!("swap has no utxos");
-            return Err(Status::failed_precondition("no utxos found"));
-        }
-
-        let utxos = utxos
+        let txos = txos
             .into_iter()
-            .filter(|utxo| {
-                let confirmations = (current_height + 1).saturating_sub(utxo.block_height);
+            .filter(|txo| {
+                let confirmations = txo.confirmations(current_height);
                 if confirmations < self.min_confirmations {
                     debug!(
-                        outpoint = field::display(utxo.outpoint),
+                        outpoint = field::display(txo.outpoint),
                         confirmations,
                         min_confirmations = self.min_confirmations,
                         "utxo has less than min confirmations"
@@ -314,10 +323,10 @@ where
                     return false;
                 }
 
-                if utxo.tx_out.value.to_sat() < parameters.min_utxo_amount_sat {
+                if txo.tx_out.value.to_sat() < parameters.min_utxo_amount_sat {
                     debug!(
-                        outpoint = field::display(utxo.outpoint),
-                        utxo_amount_sat = utxo.tx_out.value.to_sat(),
+                        outpoint = field::display(txo.outpoint),
+                        utxo_amount_sat = txo.tx_out.value.to_sat(),
                         min_utxo_amount_sat = parameters.min_utxo_amount_sat,
                         "utxo value is below min_utxo_amount_sat"
                     );
@@ -325,27 +334,27 @@ where
                 }
 
                 trace!(
-                    outpoint = field::display(utxo.outpoint),
+                    outpoint = field::display(txo.outpoint),
                     confirmations,
                     min_confirmations = self.min_confirmations,
                     "utxo has correct amount of confirmations"
                 );
                 true
             })
-            .collect::<Vec<Utxo>>();
+            .collect::<Vec<Txo>>();
 
         // TODO: Filter utxos on sync?
-        let utxos = match self.chain_filter_service.filter_utxos(utxos.clone()).await {
-            Ok(utxos) => utxos,
+        let txos = match self.chain_filter_service.filter_txos(txos.clone()).await {
+            Ok(txos) => txos,
             Err(e) => {
                 error!("failed to filter utxos: {:?}", e);
-                utxos
+                txos
             }
         };
 
         // TODO: Add ability to charge a fee?
         // Sum the utxo amounts.
-        let amount_sum_sat = utxos
+        let amount_sum_sat = txos
             .iter()
             .fold(0u64, |sum, utxo| sum + utxo.tx_out.value.to_sat());
         if amount_sum_sat != amount_sat {
@@ -373,7 +382,7 @@ where
         // If the claim tx can be created, this is a valid swap.
         self.swap_service
             .create_claim_tx(
-                &utxos
+                &txos
                     .iter()
                     .map(|utxo| ClaimableUtxo {
                         swap: swap_state.swap.clone(),
@@ -425,7 +434,7 @@ where
                 destination: invoice.get_payee_pub_key(),
                 payment_request: req.payment_request.clone(),
                 payment_hash: swap_state.swap.public.hash,
-                utxos,
+                utxos: txos,
             })
             .await?;
 

@@ -4,7 +4,7 @@ use bitcoin::{block::Bip34Error, Address, Block, Network, OutPoint};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::{debug, error};
 
-use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Utxo};
+use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Txo};
 
 use super::{memchain::Chain, types::BlockHeader, ChainError, ChainRepositoryError};
 
@@ -265,7 +265,7 @@ where
                     out.iter()
                         .map(|(outpoint, tx_out)| AddressUtxo {
                             address: a.clone(),
-                            utxo: Utxo {
+                            utxo: Txo {
                                 block_hash,
                                 block_height,
                                 outpoint: *outpoint,

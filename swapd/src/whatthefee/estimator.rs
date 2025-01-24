@@ -29,7 +29,7 @@ struct LastResponse {
 #[derive(Debug)]
 pub struct WhatTheFeeEstimator {
     url: Url,
-    lock_time: u32,
+    lock_time: u16,
     last_response: Arc<Mutex<Option<LastResponse>>>,
     poll_interval: Duration,
 }
@@ -41,7 +41,7 @@ pub enum WhatTheFeeError {
 }
 
 impl WhatTheFeeEstimator {
-    pub fn new(url: Url, lock_time: u32, poll_interval: Duration) -> Self {
+    pub fn new(url: Url, lock_time: u16, poll_interval: Duration) -> Self {
         Self {
             url,
             lock_time,

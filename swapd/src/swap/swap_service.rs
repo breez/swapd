@@ -1,11 +1,11 @@
 use std::time::SystemTime;
 
 use super::privkey_provider::{PrivateKeyError, PrivateKeyProvider};
-use crate::chain::{FeeEstimate, Utxo};
+use crate::chain::{FeeEstimate, Txo};
 use bitcoin::{
     absolute::LockTime,
     hashes::{ripemd160, sha256, Hash},
-    opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CLTV, OP_EQUALVERIFY, OP_HASH160},
+    opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CSV, OP_EQUALVERIFY, OP_HASH160},
     secp256k1::{All, Message, PublicKey, Secp256k1, SecretKey},
     sighash::{self, Prevouts, SighashCache},
     taproot::{LeafVersion, Signature, TaprootBuilder, TaprootSpendInfo},
@@ -25,9 +25,17 @@ const CLAIM_INPUT_WITNESS_SIZE: usize = 222;
 #[derive(Clone, Debug)]
 pub struct ClaimableUtxo {
     pub swap: Swap,
-    pub utxo: Utxo,
+    pub utxo: Txo,
     pub paid_with_request: Option<String>,
     pub preimage: [u8; 32],
+}
+
+impl ClaimableUtxo {
+    pub fn blocks_left(&self, current_height: u64) -> i32 {
+        let confirmations = self.utxo.confirmations(current_height) as i64;
+        let blocks_left = self.swap.public.lock_time as i64 - confirmations;
+        blocks_left as i32
+    }
 }
 
 #[derive(Debug)]
@@ -37,8 +45,16 @@ pub struct SwapState {
 }
 
 impl SwapState {
-    pub fn blocks_left(&self, current_height: u64) -> i32 {
-        self.swap.blocks_left(current_height)
+    pub fn blocks_left(&self, confirmation_height: u64, current_height: u64) -> i32 {
+        let lock_height: i64 = confirmation_height
+            .saturating_add(self.swap.public.lock_time as u64)
+            .try_into()
+            .unwrap_or(i64::MAX);
+        let current_height: i64 = current_height.try_into().unwrap_or(i64::MAX);
+        lock_height
+            .saturating_sub(current_height)
+            .try_into()
+            .unwrap_or(0)
     }
 }
 
@@ -49,19 +65,13 @@ pub struct Swap {
     pub private: SwapPrivateData,
 }
 
-impl Swap {
-    pub fn blocks_left(&self, current_height: u64) -> i32 {
-        (self.public.lock_height as i64 - current_height as i64) as i32
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct SwapPublicData {
     pub address: Address,
     pub claim_pubkey: PublicKey,
     pub claim_script: ScriptBuf,
     pub hash: sha256::Hash,
-    pub lock_height: u32,
+    pub lock_time: u16,
     pub refund_pubkey: PublicKey,
     pub refund_script: ScriptBuf,
 }
@@ -114,7 +124,7 @@ where
     // NOTE: Remove once the bitcoin crate contains the musig module.
     musig_secp: secp256k1::Secp256k1<secp256k1::All>,
     privkey_provider: P,
-    lock_time: u32,
+    lock_time: u16,
 }
 
 impl<P> SwapService<P>
@@ -124,7 +134,7 @@ where
     pub fn new(
         network: impl Into<Network>,
         privkey_provider: P,
-        lock_time: u32,
+        lock_time: u16,
         dust_limit_sat: u64,
     ) -> Self {
         Self {
@@ -157,13 +167,11 @@ where
             .push_opcode(OP_CHECKSIG)
             .into_script();
 
-        let timeout_block_height = current_height as u32 + self.lock_time;
-        let lock_height = LockTime::from_height(timeout_block_height)?;
         let refund_script = Script::builder()
             .push_x_only_key(&x_only_refund_pubkey)
             .push_opcode(OP_CHECKSIGVERIFY)
-            .push_lock_time(lock_height)
-            .push_opcode(OP_CLTV)
+            .push_sequence(Sequence::from_height(self.lock_time))
+            .push_opcode(OP_CSV)
             .into_script();
 
         let fake_address = Address::p2wpkh(
@@ -180,7 +188,7 @@ where
                 claim_pubkey,
                 claim_script,
                 hash,
-                lock_height: lock_height.to_consensus_u32(),
+                lock_time: self.lock_time,
                 refund_pubkey,
                 refund_script,
             },
@@ -286,10 +294,6 @@ where
         }
 
         Ok(tx)
-    }
-
-    pub fn lock_time(&self) -> u32 {
-        self.lock_time
     }
 
     pub fn partial_sign_refund_tx(

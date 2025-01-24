@@ -40,7 +40,7 @@ impl SwapRepository {
         let claim_pubkey: Vec<u8> = row.try_get("claim_pubkey")?;
         let claim_script: Vec<u8> = row.try_get("claim_script")?;
         let creation_time: i64 = row.try_get("creation_time")?;
-        let lock_height: i64 = row.try_get("lock_height")?;
+        let lock_time: i32 = row.try_get("lock_time")?;
         let payment_hash: Vec<u8> = row.try_get("payment_hash")?;
         let refund_pubkey: Vec<u8> = row.try_get("refund_pubkey")?;
         let refund_script: Vec<u8> = row.try_get("refund_script")?;
@@ -58,7 +58,7 @@ impl SwapRepository {
                 claim_pubkey: PublicKey::from_slice(&claim_pubkey)?,
                 claim_script: ScriptBuf::from_bytes(claim_script),
                 hash: sha256::Hash::from_slice(&payment_hash)?,
-                lock_height: lock_height as u32,
+                lock_time: lock_time as u16,
                 refund_pubkey: PublicKey::from_slice(&refund_pubkey)?,
                 refund_script: ScriptBuf::from_bytes(refund_script),
             },
@@ -91,7 +91,7 @@ impl crate::swap::SwapRepository for SwapRepository {
                ,                  claim_pubkey
                ,                  claim_script
                ,                  creation_time
-               ,                  lock_height
+               ,                  lock_time
                ,                  payment_hash
                ,                  refund_pubkey
                ,                  refund_script
@@ -102,7 +102,7 @@ impl crate::swap::SwapRepository for SwapRepository {
         .bind(swap.public.claim_pubkey.serialize())
         .bind(swap.public.claim_script.as_bytes())
         .bind(swap.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
-        .bind(swap.public.lock_height as i64)
+        .bind(swap.public.lock_time as i32)
         .bind(swap.public.hash.as_byte_array().to_vec())
         .bind(swap.public.refund_pubkey.serialize())
         .bind(swap.public.refund_script.as_bytes())
@@ -485,7 +485,7 @@ fn swap_state_fields(prefix: &str) -> String {
          , {0}.claim_pubkey
          , {0}.claim_script
          , {0}.creation_time
-         , {0}.lock_height
+         , {0}.lock_time
          , {0}.payment_hash
          , {0}.preimage
          , {0}.refund_pubkey

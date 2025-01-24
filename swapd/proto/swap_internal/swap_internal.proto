@@ -45,7 +45,7 @@ message ListClaimableResponse {
 message ClaimableUtxo {
     string outpoint = 1;
     string swap_hash = 2;
-    uint32 lock_height = 3;
+    uint32 lock_time = 3;
     uint64 confirmation_height = 4;
     string block_hash = 5;
     int32 blocks_left = 6;

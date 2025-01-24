@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use futures::{stream::FuturesUnordered, StreamExt};
 
-use crate::chain::{ChainClient, Utxo};
+use crate::chain::{ChainClient, Txo};
 
 use super::ChainFilterRepository;
 
 #[async_trait::async_trait]
 pub trait ChainFilterService {
-    async fn filter_utxos(&self, utxos: Vec<Utxo>)
-        -> Result<Vec<Utxo>, Box<dyn std::error::Error>>;
+    async fn filter_txos(&self, utxos: Vec<Txo>) -> Result<Vec<Txo>, Box<dyn std::error::Error>>;
 }
 
 #[derive(Debug)]
@@ -34,10 +33,10 @@ where
         }
     }
 
-    async fn should_filter_utxo(&self, utxo: Utxo) -> Result<bool, Box<dyn std::error::Error>> {
+    async fn should_filter_txo(&self, txo: Txo) -> Result<bool, Box<dyn std::error::Error>> {
         let sender_addresses = self
             .chain_client
-            .get_sender_addresses(&[utxo.outpoint])
+            .get_sender_addresses(&[txo.outpoint])
             .await?;
         self.repository
             .has_filtered_address(&sender_addresses)
@@ -51,25 +50,22 @@ where
     C: ChainClient + Send + Sync,
     R: ChainFilterRepository + Send + Sync,
 {
-    async fn filter_utxos(
-        &self,
-        utxos: Vec<Utxo>,
-    ) -> Result<Vec<Utxo>, Box<dyn std::error::Error>> {
+    async fn filter_txos(&self, txos: Vec<Txo>) -> Result<Vec<Txo>, Box<dyn std::error::Error>> {
         let mut futures = FuturesUnordered::new();
-        for utxo in utxos {
-            let fut = self.should_filter_utxo(utxo.clone());
+        for txo in txos {
+            let fut = self.should_filter_txo(txo.clone());
             futures.push(async {
                 let should_filter_res = fut.await;
-                (utxo, should_filter_res)
+                (txo, should_filter_res)
             })
         }
 
         let mut result = Vec::new();
-        while let Some((utxo, should_filter_res)) = futures.next().await {
+        while let Some((txo, should_filter_res)) = futures.next().await {
             if should_filter_res? {
                 continue;
             }
-            result.push(utxo);
+            result.push(txo);
         }
         Ok(result)
     }
