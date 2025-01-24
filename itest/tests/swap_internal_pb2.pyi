@@ -93,7 +93,7 @@ class ClaimableUtxo(_message.Message):
     __slots__ = (
         "outpoint",
         "swap_hash",
-        "lock_height",
+        "lock_time",
         "confirmation_height",
         "block_hash",
         "blocks_left",
@@ -101,14 +101,14 @@ class ClaimableUtxo(_message.Message):
     )
     OUTPOINT_FIELD_NUMBER: _ClassVar[int]
     SWAP_HASH_FIELD_NUMBER: _ClassVar[int]
-    LOCK_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    LOCK_TIME_FIELD_NUMBER: _ClassVar[int]
     CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     BLOCK_HASH_FIELD_NUMBER: _ClassVar[int]
     BLOCKS_LEFT_FIELD_NUMBER: _ClassVar[int]
     PAID_WITH_REQUEST_FIELD_NUMBER: _ClassVar[int]
     outpoint: str
     swap_hash: str
-    lock_height: int
+    lock_time: int
     confirmation_height: int
     block_hash: str
     blocks_left: int
@@ -117,7 +117,7 @@ class ClaimableUtxo(_message.Message):
         self,
         outpoint: _Optional[str] = ...,
         swap_hash: _Optional[str] = ...,
-        lock_height: _Optional[int] = ...,
+        lock_time: _Optional[int] = ...,
         confirmation_height: _Optional[int] = ...,
         block_hash: _Optional[str] = ...,
         blocks_left: _Optional[int] = ...,

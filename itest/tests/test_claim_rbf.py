@@ -43,7 +43,14 @@ def test_claim_rbf_close_to_deadline(node_factory, swapd_factory, lock_time):
         if len(memp) == 0:
             return False
         assert len(memp) == 1
-        return memp[0] != claim_txid1
+        claim_txid2 = memp[0]
+        if claim_txid2 == claim_txid1:
+            return False
+
+        claim_raw2 = swapper.lightning_node.bitcoin.rpc.getrawtransaction(
+            claim_txid2, True
+        )
+        return claim_raw2["vout"][0]["value"] != claim_raw1["vout"][0]["value"]
 
     wait_for(check_bumped)
     claim_txid2 = swapper.lightning_node.bitcoin.rpc.getrawmempool()[0]

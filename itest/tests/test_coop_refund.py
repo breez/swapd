@@ -19,7 +19,7 @@ def coop_refund(
     h,
     refund_privkey,
     claim_pubkey,
-    lock_height,
+    lock_time,
     to_spend_txid,
     refund_amount,
 ):
@@ -57,8 +57,8 @@ def coop_refund(
             [
                 refund_privkey.get_public_key().to_x_only_hex(),
                 "OP_CHECKSIGVERIFY",
-                lock_height,
-                "OP_CHECKLOCKTIMEVERIFY",
+                lock_time,
+                "OP_CHECKSEQUENCEVERIFY",
             ]
         ),
     ]
@@ -89,7 +89,7 @@ def coop_refund(
 def test_cooperative_refund_success(node_factory, swapd_factory):
     setup("regtest")
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, _, h, refund_privkey, claim_pubkey, lock_height = (
+    address, _, h, refund_privkey, claim_pubkey, lock_time = (
         create_swap_no_invoice_extended(user, swapper)
     )
     to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
@@ -104,7 +104,7 @@ def test_cooperative_refund_success(node_factory, swapd_factory):
         h,
         refund_privkey,
         claim_pubkey,
-        lock_height,
+        lock_time,
         to_spend_txid,
         99_000,
     )
@@ -118,7 +118,7 @@ def test_cooperative_refund_success(node_factory, swapd_factory):
 def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
     setup("regtest")
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, _, h, refund_privkey, claim_pubkey, lock_height = (
+    address, _, h, refund_privkey, claim_pubkey, lock_time = (
         create_swap_no_invoice_extended(user, swapper)
     )
     to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
@@ -134,7 +134,7 @@ def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
         h,
         refund_privkey,
         claim_pubkey,
-        lock_height,
+        lock_time,
         to_spend_txid,
         99_000,
     )
@@ -146,7 +146,7 @@ def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
         h,
         refund_privkey,
         claim_pubkey,
-        lock_height,
+        lock_time,
         to_spend_txid,
         98_000,
     )
@@ -158,7 +158,7 @@ def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
 def test_cooperative_refund_then_pay_failure(node_factory, swapd_factory):
     setup("regtest")
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, payment_request, h, refund_privkey, claim_pubkey, lock_height = (
+    address, payment_request, h, refund_privkey, claim_pubkey, lock_time = (
         create_swap_extended(user, swapper)
     )
     to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
@@ -173,7 +173,7 @@ def test_cooperative_refund_then_pay_failure(node_factory, swapd_factory):
         h,
         refund_privkey,
         claim_pubkey,
-        lock_height,
+        lock_time,
         to_spend_txid,
         99_000,
     )
@@ -187,7 +187,7 @@ def test_cooperative_refund_then_pay_failure(node_factory, swapd_factory):
 def test_pay_then_cooperative_refund_failure(node_factory, swapd_factory):
     setup("regtest")
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, payment_request, h, refund_privkey, claim_pubkey, lock_height = (
+    address, payment_request, h, refund_privkey, claim_pubkey, lock_time = (
         create_swap_extended(user, swapper)
     )
     to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
@@ -205,7 +205,7 @@ def test_pay_then_cooperative_refund_failure(node_factory, swapd_factory):
             h,
             refund_privkey,
             claim_pubkey,
-            lock_height,
+            lock_time,
             to_spend_txid,
             99_000,
         )

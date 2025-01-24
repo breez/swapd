@@ -66,7 +66,7 @@ def create_swap_no_invoice_extended(user: ClnNode, swapper: SwapdServer):
         h.hex(),
         refund_privkey,
         create_swap_resp.claim_pubkey,
-        create_swap_resp.lock_height,
+        create_swap_resp.lock_time,
     )
 
 
@@ -76,7 +76,7 @@ def create_swap_no_invoice(user: ClnNode, swapper: SwapdServer):
 
 
 def create_swap_extended(user: ClnNode, swapper: SwapdServer, amount=100_000_000):
-    address, preimage, h, refund_privkey, claim_pubkey, lock_height = (
+    address, preimage, h, refund_privkey, claim_pubkey, lock_time = (
         create_swap_no_invoice_extended(user, swapper)
     )
     payment_request = user.create_invoice(
@@ -84,7 +84,7 @@ def create_swap_extended(user: ClnNode, swapper: SwapdServer, amount=100_000_000
         description="test",
         preimage=preimage,
     )
-    return address, payment_request, h, refund_privkey, claim_pubkey, lock_height
+    return address, payment_request, h, refund_privkey, claim_pubkey, lock_time
 
 
 def create_swap(user: ClnNode, swapper: SwapdServer, amount=100_000_000):

@@ -16,7 +16,7 @@ def test_below_cltv_limit(
         100_000_000,
         description="test",
         preimage=preimage,
-        cltv=lock_time - 1 - min_claim_blocks - min_viable_cltv + 1,
+        cltv=lock_time - min_claim_blocks - min_viable_cltv + 1,
     )
 
     try:
@@ -40,7 +40,7 @@ def test_on_cltv_limit(
         100_000_000,
         description="test",
         preimage=preimage,
-        cltv=lock_time - 1 - min_claim_blocks - min_viable_cltv,
+        cltv=lock_time - min_claim_blocks - min_viable_cltv,
     )
 
     swapper.rpc.pay_swap(payment_request)
@@ -63,7 +63,7 @@ def test_below_cltv_limit_with_router(
         100_000_000,
         description="test",
         preimage=preimage,
-        cltv=lock_time - 1 - min_claim_blocks - cltv_delta + 1,
+        cltv=lock_time - min_claim_blocks - cltv_delta + 1,
     )
 
     try:
@@ -92,7 +92,7 @@ def test_on_cltv_limit_with_router(
         100_000_000,
         description="test",
         preimage=preimage,
-        cltv=lock_time - 1 - min_claim_blocks - cltv_delta - 3,
+        cltv=lock_time - min_claim_blocks - cltv_delta - 3,
     )
 
     swapper.rpc.pay_swap(payment_request)

@@ -213,6 +213,11 @@ KeyAggContext = NamedTuple(
 )
 
 
+def get_pk(keyagg_ctx: KeyAggContext) -> PlainPk:
+    Q, _, _ = keyagg_ctx
+    return PlainPk(cbytes(Q))
+
+
 def get_xonly_pk(keyagg_ctx: KeyAggContext) -> XonlyPk:
     Q, _, _ = keyagg_ctx
     return XonlyPk(xbytes(Q))
