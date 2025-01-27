@@ -70,6 +70,7 @@ impl claim::ClaimRepository for ClaimRepository {
         .execute(&mut *db_tx)
         .await?;
 
+        db_tx.commit().await?;
         Ok(())
     }
 
@@ -86,7 +87,7 @@ impl claim::ClaimRepository for ClaimRepository {
                ,      r.fee_per_kw
                ,      r.auto_bump
                FROM claims r
-               WHERE tx_id IN (
+               WHERE r.tx_id IN (
                    SELECT ri.claim_tx_id
                    FROM claim_inputs ri
                    WHERE ri.tx_id NOT IN (
