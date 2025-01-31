@@ -8,7 +8,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tokio::join;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, field, instrument};
+use tracing::{debug, error, field, instrument, trace};
 
 use crate::chain::BroadcastError;
 use crate::swap::ClaimableUtxo;
@@ -145,6 +145,12 @@ where
                 .iter()
                 .all(|outpoint| claimables.contains_key(outpoint))
             {
+                debug!(
+                    "claim tx {} spends outputs that are no longer claimable, skipping so those outputs can be claimed in a new tx.",
+                    claim.tx.compute_txid(),
+                );
+
+                // TODO: Remove claim from db? Mark it as invalid?
                 continue;
             }
 
@@ -178,6 +184,10 @@ where
             if claimable.paid_with_request.is_none() {
                 // TODO: Handle the case where the payment result was not
                 //       persisted.
+                debug!(
+                    "skipping claim for utxo '{}' as it was not paid over lightning",
+                    claimable.utxo.outpoint
+                );
                 continue;
             }
 
@@ -208,12 +218,12 @@ where
         while let Some((res, claim, claimables)) = futures.next().await {
             // TODO: Extract the reason for error, and come up with solutions
             //       how to redo the claiming another way.
+            let claimables = claimables
+                .iter()
+                .map(|claimable| claimable.utxo.outpoint.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
             if let Err(e) = res {
-                let claimables = claimables
-                    .iter()
-                    .map(|claimable| claimable.utxo.outpoint.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",");
                 match claim {
                     Some(claim) => error!(
                         tx_id = field::display(claim.tx.compute_txid()),
@@ -223,6 +233,8 @@ where
                     ),
                     None => error!(outpoints = claimables, "failed to create claim: {:?}", e),
                 }
+            } else {
+                trace!(outpoints = claimables, "successfully processed claim");
             }
         }
 
