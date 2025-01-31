@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use tracing::trace;
+
 use crate::chain::{self, FeeEstimate, FeeEstimateError};
 
 use super::{client::CallError, BitcoindClient};
@@ -23,6 +25,11 @@ impl chain::FeeEstimator for FeeEstimator {
         // feerate is btc/kb (multiply by 100_000_000 and divide by 4)
         let sat_per_kw = (fee.feerate * 25_000_000.0).ceil() as u32;
 
+        trace!(
+            "fee estimate for {} blocks: {} sat/kw",
+            conf_target,
+            sat_per_kw
+        );
         Ok(FeeEstimate { sat_per_kw })
     }
 }
