@@ -90,6 +90,7 @@ where
             }
             token2.cancel();
         });
+        tracker.close();
         tracker.wait().await;
 
         Ok(())
