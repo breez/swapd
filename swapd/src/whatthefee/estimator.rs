@@ -145,6 +145,12 @@ impl FeeEstimator for WhatTheFeeEstimator {
         let rate = row[column_index] as f64;
         let sat_per_vbyte = (rate / 100.).exp();
         let sat_per_kw = (sat_per_vbyte * 250.) as u32;
+
+        trace!(
+            "fee estimate for {} blocks: {} sat/kw",
+            conf_target,
+            sat_per_kw
+        );
         Ok(FeeEstimate { sat_per_kw })
     }
 }
