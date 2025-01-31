@@ -285,20 +285,20 @@ where
             .collect();
 
         debug!(
-            "block {} contains {} utxos to watched addresses",
+            "block {} contains {} outputs to watched addresses",
             block_hash,
             watch_utxos.len()
         );
 
         for utxo in &watch_utxos {
             info!(
-                "block {} ({}) contains utxo {} for address {}, amount {}",
+                "block {} ({}) contains output {} for address {}, amount {}",
                 block_height, block_hash, utxo.utxo.outpoint, utxo.address, utxo.utxo.tx_out.value
             );
         }
         for spent_txo in &spent_txos {
             info!(
-                "block {} ({}) contains tx {} spending utxo {} in input {}",
+                "block {} ({}) contains tx {} spending output {} in input {}",
                 block_height,
                 block_hash,
                 spent_txo.spending_tx,
