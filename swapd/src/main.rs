@@ -347,7 +347,6 @@ where
     let token = CancellationToken::new();
     let signal_token = token.clone();
     let tracker = TaskTracker::new();
-
     tokio::spawn(async move {
         match signal::ctrl_c().await {
             Ok(()) => {}
@@ -484,6 +483,11 @@ where
     }
 
     info!("swapd started");
+
+    // Ensure the tracker completes when all tasks have completed.
+    tracker.close();
+
+    // Wait for all background tasks to complete.
     tracker.wait().await;
     info!("shutdown complete");
     Ok(())
