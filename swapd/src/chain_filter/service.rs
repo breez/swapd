@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use futures::{stream::FuturesUnordered, StreamExt};
+use tracing::{debug, field};
 
 use crate::chain::{ChainClient, Txo};
 
@@ -63,6 +64,7 @@ where
         let mut result = Vec::new();
         while let Some((txo, should_filter_res)) = futures.next().await {
             if should_filter_res? {
+                debug!(outpoint = field::display(txo.outpoint), "filtering utxo");
                 continue;
             }
             result.push(txo);
