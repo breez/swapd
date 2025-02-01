@@ -13,11 +13,12 @@ use tonic::{
 };
 use tracing::{error, field, instrument, trace, trace_span, warn};
 
-use crate::lightning::{LightningError, PaymentResult, PreimageResult};
+use crate::lightning::{LightningError, PaymentResult, PaymentState, PreimageResult};
 
 use super::{
     lnrpc::{
         htlc_attempt::HtlcStatus, lightning_client::LightningClient, payment::PaymentStatus, Hop,
+        ListPaymentsRequest,
     },
     routerrpc::{router_client::RouterClient, SendPaymentRequest, TrackPaymentRequest},
     Repository, RepositoryError,
@@ -147,6 +148,74 @@ impl<R> crate::lightning::LightningClient for Client<R>
 where
     R: Repository + Send + Sync,
 {
+    #[instrument(level = "trace", skip(self))]
+    async fn get_payment_state(
+        &self,
+        hash: sha256::Hash,
+        label: &str,
+    ) -> Result<PaymentState, LightningError> {
+        let payment_index = self.repository.get_payment_index(label).await?;
+        let mut client = self.get_client().await?;
+        let mut router_client = self.get_router_client().await?;
+        let mut payment = None;
+        if let Some(payment_index) = payment_index {
+            let resp = client
+                .list_payments(ListPaymentsRequest {
+                    include_incomplete: true,
+                    index_offset: payment_index,
+                    max_payments: 1,
+                    ..Default::default()
+                })
+                .await?
+                .into_inner();
+            payment = resp.payments.into_iter().next();
+        }
+
+        // TODO: The part below might fetch the latest version of a payment, rather than the one requested by the label. What to do?
+        //       That might interfere with the active locks that shouldn't be removed.
+        if payment.is_none() {
+            let res = router_client
+                .track_payment_v2(TrackPaymentRequest {
+                    payment_hash: hash.as_byte_array().to_vec(),
+                    no_inflight_updates: false,
+                })
+                .await;
+            let mut stream = match res {
+                Ok(res) => res.into_inner(),
+                Err(e) => {
+                    return match e.code() {
+                        tonic::Code::NotFound => Err(LightningError::PaymentNotFound),
+                        _ => Err(LightningError::General(e)),
+                    }
+                }
+            };
+
+            // TODO: Get or insert label.
+            payment = Some(
+                stream
+                    .message()
+                    .await?
+                    .ok_or(LightningError::ConnectionFailed)?,
+            );
+        }
+
+        let payment = payment.ok_or(LightningError::PaymentNotFound)?;
+        match payment.status() {
+            PaymentStatus::Unknown => Ok(PaymentState::Pending),
+            PaymentStatus::InFlight => Ok(PaymentState::Pending),
+            PaymentStatus::Succeeded => {
+                let preimage = hex::decode(payment.payment_preimage)
+                    .map_err(|_| LightningError::InvalidPreimage)?
+                    .try_into()
+                    .map_err(|_| LightningError::InvalidPreimage)?;
+                Ok(PaymentState::Success { preimage })
+            }
+            PaymentStatus::Failed => Ok(PaymentState::Failure {
+                error: String::from(payment.failure_reason().as_str_name()),
+            }),
+            PaymentStatus::Initiated => Ok(PaymentState::Pending),
+        }
+    }
     async fn get_preimage(
         &self,
         hash: sha256::Hash,

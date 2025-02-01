@@ -134,5 +134,5 @@ CREATE INDEX claim_inputs_claim_tx_id_idx ON claim_inputs(claim_tx_id);
 
 CREATE TABLE lnd_payments (
     payment_index BIGINT NOT NULL PRIMARY KEY,
-    label VARCHAR NOT NULL
+    label VARCHAR UNIQUE NOT NULL
 );
