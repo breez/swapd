@@ -377,7 +377,6 @@ where
                     Ok(_) => info!("historical payment monitor exited"),
                     Err(e) => info!("historical payment monitor exited with {:?}", e),
                 };
-                payment_monitor_token.cancel();
             });
         }
         Err(e) => warn!("failed to initialize historical payment monitor: {:?}, continuing without processing historical payments.", e),
