@@ -141,16 +141,8 @@ impl crate::swap::SwapRepository for SwapRepository {
 
         let id: i64 = row.try_get("id")?;
         // Now store the used utxos.
-        let tx_ids: Vec<_> = attempt
-            .utxos
-            .iter()
-            .map(|u| u.outpoint.txid.to_string())
-            .collect();
-        let output_indices: Vec<_> = attempt
-            .utxos
-            .iter()
-            .map(|u| u.outpoint.vout as i64)
-            .collect();
+        let tx_ids: Vec<_> = attempt.outputs.iter().map(|o| o.txid.to_string()).collect();
+        let output_indices: Vec<_> = attempt.outputs.iter().map(|o| o.vout as i64).collect();
         sqlx::query(
             r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
                SELECT $1, t.tx_id, t.output_index

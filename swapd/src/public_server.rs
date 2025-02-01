@@ -433,7 +433,7 @@ where
                 destination: invoice.get_payee_pub_key(),
                 payment_request: req.payment_request.clone(),
                 payment_hash: swap_state.swap.public.hash,
-                utxos: txos,
+                outputs: txos.iter().map(|utxo| utxo.outpoint).collect(),
             })
             .await?;
 

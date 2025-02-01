@@ -3,7 +3,6 @@ use std::{collections::HashMap, time::SystemTime};
 use bitcoin::{hashes::sha256, secp256k1, Address, OutPoint};
 use thiserror::Error;
 
-use crate::chain::Txo;
 use crate::lightning::PaymentResult;
 
 use super::{swap_service::Swap, SwapState};
@@ -46,12 +45,12 @@ pub enum GetSwapsError {
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PaymentAttempt {
     pub creation_time: SystemTime,
     pub label: String,
     pub payment_hash: sha256::Hash,
-    pub utxos: Vec<Txo>,
+    pub outputs: Vec<OutPoint>,
     pub amount_msat: u64,
     pub destination: secp256k1::PublicKey,
     pub payment_request: String,
