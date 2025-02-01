@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bitcoin::{block::Bip34Error, Address, Block, Network, OutPoint};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing::{debug, error};
+use tracing::{debug, error, field, info};
 
 use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Txo};
 
@@ -56,6 +56,10 @@ where
                             .await?;
                     }
 
+                    info!(
+                        birthday_hash = field::display(birthday_header.hash),
+                        "using block {} as birthday", birthday_header.height
+                    );
                     self.chain_repository
                         .add_block(&birthday_header, &Vec::new(), &Vec::new())
                         .await?;
@@ -157,6 +161,8 @@ where
         let mut current_header = self.chain_client.get_block_header(&tip_hash).await?;
         let mut new_chain = Chain::new(current_header.clone());
 
+        debug!("chain tip is at height {}", current_header.height);
+
         // Iterate backwards from the tip to get the missed block headers.
         loop {
             if token.is_cancelled() {
@@ -197,8 +203,8 @@ where
                 }
 
                 debug!(
-                    "block {} was reorged out of the chain, undoing block",
-                    reorg_block.hash
+                    "block {} ({}) was reorged out of the chain, undoing block",
+                    reorg_block.height, reorg_block.hash
                 );
                 self.chain_repository.undo_block(reorg_block.hash).await?;
             }
@@ -283,6 +289,12 @@ where
             block_hash,
             watch_utxos.len()
         );
+        for utxo in &watch_utxos {
+            info!(
+                "block {} ({}) contains utxo {} for address {}, amount {}",
+                block_height, block_hash, utxo.utxo.outpoint, utxo.address, utxo.utxo.tx_out.value
+            );
+        }
         self.chain_repository
             .add_block(
                 &BlockHeader {
