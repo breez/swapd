@@ -45,6 +45,12 @@ pub enum GetSwapsError {
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
+#[derive(Debug, Error)]
+pub enum GetUnhandledPaymentAttemptsError {
+    #[error("{0}")]
+    General(Box<dyn std::error::Error + Sync + Send>),
+}
+
 #[derive(Clone, Debug)]
 pub struct PaymentAttempt {
     pub creation_time: SystemTime,
@@ -95,6 +101,9 @@ pub trait SwapRepository {
         &self,
         addresses: &[Address],
     ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError>;
+    async fn get_unhandled_payment_attempts(
+        &self,
+    ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError>;
     async fn lock_swap_payment(
         &self,
         swap: &Swap,

@@ -12,7 +12,7 @@ use postgresql::LndRepository;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use reqwest::Url;
 use sqlx::{PgPool, Pool, Postgres};
-use swap::{RandomPrivateKeyProvider, RingRandomProvider, SwapService};
+use swap::{HistoricalPaymentMonitor, RandomPrivateKeyProvider, RingRandomProvider, SwapService};
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Certificate, Identity, Server, Uri};
@@ -159,6 +159,10 @@ struct Args {
     /// Polling interval between claim runs.
     #[arg(long, default_value = "60")]
     pub claim_poll_interval_seconds: u64,
+
+    /// Polling interval between checking historical payment states.
+    #[arg(long, default_value = "120")]
+    pub payment_poll_interval_seconds: u64,
 
     /// Polling interval between checking for uncaught preimages.
     #[arg(long, default_value = "60")]
@@ -356,6 +360,29 @@ where
         }
         signal_token.cancel();
     });
+    let mut payment_monitor = HistoricalPaymentMonitor::new(
+        Arc::clone(&lightning_client),
+        Duration::from_secs(args.payment_poll_interval_seconds),
+        Arc::clone(&swap_repository),
+    );
+    match payment_monitor.initialize().await {
+        Ok(_) => {
+            let payment_monitor_token = token.clone();
+            tracker.spawn(async move {
+                info!("Starting historical payment monitor");
+                let res = payment_monitor
+                    .start(payment_monitor_token.child_token())
+                    .await;
+                match res {
+                    Ok(_) => info!("historical payment monitor exited"),
+                    Err(e) => info!("historical payment monitor exited with {:?}", e),
+                };
+                payment_monitor_token.cancel();
+            });
+        }
+        Err(e) => warn!("failed to initialize historical payment monitor: {:?}, continuing without processing historical payments.", e),
+    }
+
     if !args.no_claim {
         let claim_monitor_token = token.clone();
         let claim_monitor = ClaimMonitor::new(ClaimMonitorParams {
