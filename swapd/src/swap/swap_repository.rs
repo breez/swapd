@@ -94,17 +94,22 @@ pub trait SwapRepository {
     async fn get_unhandled_payment_attempts(
         &self,
     ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError>;
-    async fn lock_add_payment_attempt(
+    async fn lock_add_payment_attempt(&self, attempt: &PaymentAttempt)
+        -> Result<(), LockSwapError>;
+    async fn lock_swap_refund(
         &self,
-        swap: &Swap,
-        attempt: &PaymentAttempt,
+        hash: &sha256::Hash,
+        refund_id: &str,
     ) -> Result<(), LockSwapError>;
-    async fn lock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError>;
     async fn unlock_add_payment_result(
         &self,
-        swap: &Swap,
+        hash: &sha256::Hash,
         payment_label: &str,
         result: &PaymentResult,
     ) -> Result<(), LockSwapError>;
-    async fn unlock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError>;
+    async fn unlock_swap_refund(
+        &self,
+        hash: &sha256::Hash,
+        refund_id: &str,
+    ) -> Result<(), LockSwapError>;
 }

@@ -413,18 +413,15 @@ where
         let label = format!("{}-{}", hash, unix_ns_now);
         match self
             .swap_repository
-            .lock_add_payment_attempt(
-                &swap_state.swap,
-                &PaymentAttempt {
-                    amount_msat,
-                    creation_time: now,
-                    label: label.clone(),
-                    destination: invoice.get_payee_pub_key(),
-                    payment_request: req.payment_request.clone(),
-                    payment_hash: swap_state.swap.public.hash,
-                    outputs: txos.iter().map(|utxo| utxo.outpoint).collect(),
-                },
-            )
+            .lock_add_payment_attempt(&PaymentAttempt {
+                amount_msat,
+                creation_time: now,
+                label: label.clone(),
+                destination: invoice.get_payee_pub_key(),
+                payment_request: req.payment_request.clone(),
+                payment_hash: swap_state.swap.public.hash,
+                outputs: txos.iter().map(|utxo| utxo.outpoint).collect(),
+            })
             .await
         {
             Ok(_) => debug!("added payment attempt, locked swap for payment"),
@@ -463,7 +460,7 @@ where
         // payment did succeed.
         match self
             .swap_repository
-            .unlock_add_payment_result(&swap_state.swap, &label, &pay_result)
+            .unlock_add_payment_result(&swap_state.swap.public.hash, &label, &pay_result)
             .await
         {
             Ok(_) => {}
@@ -583,7 +580,7 @@ where
         // user _can_ create a new refund later, however.
         match self
             .swap_repository
-            .lock_swap_refund(&swap.swap, &refund_id)
+            .lock_swap_refund(&swap.swap.public.hash, &refund_id)
             .await
         {
             Ok(_) => debug!("locked swap for refund."),
@@ -605,7 +602,7 @@ where
             Ok(true) => {
                 let _ = self
                     .swap_repository
-                    .unlock_swap_refund(&swap.swap, &refund_id)
+                    .unlock_swap_refund(&swap.swap.public.hash, &refund_id)
                     .await;
                 return Err(Status::failed_precondition("swap is locked"));
             }
@@ -613,7 +610,7 @@ where
                 error!("failed to check for pending or complete payment: {:?}", e);
                 let _ = self
                     .swap_repository
-                    .unlock_swap_refund(&swap.swap, &refund_id)
+                    .unlock_swap_refund(&swap.swap.public.hash, &refund_id)
                     .await;
                 return Err(Status::internal("internal error"));
             }

@@ -331,11 +331,10 @@ impl crate::swap::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn lock_add_payment_attempt(
         &self,
-        swap: &Swap,
         attempt: &PaymentAttempt,
     ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(&attempt.payment_hash, &mut *tx).await?;
 
         // Payments can only be locked if there is no refund lock and no other payment lock.
         let count: i64 = sqlx::query(
@@ -343,7 +342,7 @@ impl crate::swap::SwapRepository for SwapRepository {
              FROM swap_locks 
              WHERE swap_payment_hash = $1",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
         .fetch_one(&mut *tx)
         .await?
         .try_get(0)?;
@@ -355,7 +354,7 @@ impl crate::swap::SwapRepository for SwapRepository {
             "INSERT INTO swap_locks (swap_payment_hash, payment_attempt_label)
              VALUES($1, $2)",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
         .bind(&attempt.label)
         .execute(&mut *tx)
         .await?;
@@ -401,9 +400,13 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(())
     }
 
-    async fn lock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError> {
+    async fn lock_swap_refund(
+        &self,
+        hash: &sha256::Hash,
+        refund_id: &str,
+    ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(hash, &mut *tx).await?;
 
         // Refunds can be locked with another refund lock, but not with a payment lock.
         let count: i64 = sqlx::query(
@@ -411,7 +414,7 @@ impl crate::swap::SwapRepository for SwapRepository {
              FROM swap_locks 
              WHERE swap_payment_hash = $1 AND payment_attempt_label IS NOT NULL",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .fetch_one(&mut *tx)
         .await?
         .try_get(0)?;
@@ -423,7 +426,7 @@ impl crate::swap::SwapRepository for SwapRepository {
             "INSERT INTO swap_locks (swap_payment_hash, refund_id)
              VALUES($1, $2)",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .bind(refund_id)
         .execute(&mut *tx)
         .await?;
@@ -435,18 +438,18 @@ impl crate::swap::SwapRepository for SwapRepository {
     #[instrument(level = "trace", skip(self))]
     async fn unlock_add_payment_result(
         &self,
-        swap: &Swap,
+        hash: &sha256::Hash,
         payment_label: &str,
         result: &PaymentResult,
     ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(hash, &mut *tx).await?;
 
         sqlx::query(
             "DELETE FROM swap_locks
              WHERE swap_payment_hash = $1 AND payment_attempt_label = $2",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .bind(payment_label)
         .execute(&mut *tx)
         .await?;
@@ -455,7 +458,7 @@ impl crate::swap::SwapRepository for SwapRepository {
             PaymentResult::Success { preimage } => {
                 sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
                     .bind(preimage.to_vec())
-                    .bind(swap.public.hash.as_byte_array().to_vec())
+                    .bind(hash.as_byte_array().to_vec())
                     .execute(&mut *tx)
                     .await?;
 
@@ -479,15 +482,19 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(())
     }
 
-    async fn unlock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError> {
+    async fn unlock_swap_refund(
+        &self,
+        hash: &sha256::Hash,
+        refund_id: &str,
+    ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(hash, &mut *tx).await?;
 
         sqlx::query(
             "DELETE FROM swap_locks
              WHERE swap_payment_hash = $1 AND refund_id = $2",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .bind(refund_id)
         .execute(&mut *tx)
         .await?;
@@ -497,13 +504,13 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 }
 
-async fn lock_swap_for_update<'c, E>(swap: &Swap, executor: E) -> Result<(), LockSwapError>
+async fn lock_swap_for_update<'c, E>(hash: &sha256::Hash, executor: E) -> Result<(), LockSwapError>
 where
     E: Executor<'c, Database = Postgres>,
 {
     // Take a lock on the swap hash, so simultaneous locks will wait.
     let locked_swap_row = sqlx::query("SELECT * FROM swaps WHERE payment_hash = $1 FOR UPDATE")
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .fetch_optional(executor)
         .await?;
     if locked_swap_row.is_none() {

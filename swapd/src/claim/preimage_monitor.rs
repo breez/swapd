@@ -104,7 +104,7 @@ where
 
             if let Err(e) = self
                 .swap_repository
-                .add_payment_result(
+                .unlock_add_payment_result(
                     &hash,
                     &preimage_result.label,
                     &PaymentResult::Success {

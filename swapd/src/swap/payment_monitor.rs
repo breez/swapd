@@ -80,10 +80,6 @@ where
                 "checking_payment",
                 payment_hash = field::display(&attempt.payment_hash)
             );
-            let swap_state = self
-                .swap_repository
-                .get_swap_by_hash(&attempt.payment_hash)
-                .await?;
             let state = match self
                 .lightning_client
                 .get_payment_state(attempt.payment_hash, &attempt.label)
@@ -94,7 +90,7 @@ where
                     debug!("historical swap payment not found, removing from pending payments",);
                     self.swap_repository
                         .unlock_add_payment_result(
-                            &swap_state.swap,
+                            &attempt.payment_hash,
                             &attempt.label,
                             &PaymentResult::Failure {
                                 error: "cancelled".to_string(),
@@ -112,7 +108,7 @@ where
                     debug!("historical swap payment was successful",);
                     self.swap_repository
                         .unlock_add_payment_result(
-                            &swap_state.swap,
+                            &attempt.payment_hash,
                             &attempt.label,
                             &PaymentResult::Success { preimage },
                         )
@@ -122,7 +118,7 @@ where
                     debug!("historical swap payment failed with error: {}", error,);
                     self.swap_repository
                         .unlock_add_payment_result(
-                            &swap_state.swap,
+                            &attempt.payment_hash,
                             &attempt.label,
                             &PaymentResult::Failure { error },
                         )
