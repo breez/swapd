@@ -77,16 +77,6 @@ pub struct PaidOutpoint {
 #[async_trait::async_trait]
 pub trait SwapRepository {
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError>;
-    async fn add_payment_attempt(
-        &self,
-        attempt: &PaymentAttempt,
-    ) -> Result<(), SwapPersistenceError>;
-    async fn add_payment_result(
-        &self,
-        hash: &sha256::Hash,
-        label: &str,
-        result: &PaymentResult,
-    ) -> Result<(), AddPaymentResultError>;
     async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapsError>;
     async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapsError>;
     async fn get_swap_by_payment_request(
@@ -104,16 +94,17 @@ pub trait SwapRepository {
     async fn get_unhandled_payment_attempts(
         &self,
     ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError>;
-    async fn lock_swap_payment(
+    async fn lock_add_payment_attempt(
         &self,
         swap: &Swap,
-        payment_label: &str,
+        attempt: &PaymentAttempt,
     ) -> Result<(), LockSwapError>;
     async fn lock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError>;
-    async fn unlock_swap_payment(
+    async fn unlock_add_payment_result(
         &self,
         swap: &Swap,
         payment_label: &str,
+        result: &PaymentResult,
     ) -> Result<(), LockSwapError>;
     async fn unlock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError>;
 }

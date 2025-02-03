@@ -113,87 +113,6 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn add_payment_attempt(
-        &self,
-        attempt: &PaymentAttempt,
-    ) -> Result<(), SwapPersistenceError> {
-        let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            r#"
-            INSERT INTO payment_attempts (swap_payment_hash
-            ,                             label
-            ,                             creation_time
-            ,                             amount_msat
-            ,                             payment_request
-            ,                             destination)
-            VALUES($1, $2, $3, $4, $5, $6)
-            RETURNING id
-            "#,
-        )
-        .bind(attempt.payment_hash.as_byte_array().to_vec())
-        .bind(&attempt.label)
-        .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
-        .bind(attempt.amount_msat as i64)
-        .bind(&attempt.payment_request)
-        .bind(attempt.destination.serialize().to_vec())
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let id: i64 = row.try_get("id")?;
-        // Now store the used utxos.
-        let tx_ids: Vec<_> = attempt.outputs.iter().map(|o| o.txid.to_string()).collect();
-        let output_indices: Vec<_> = attempt.outputs.iter().map(|o| o.vout as i64).collect();
-        sqlx::query(
-            r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
-               SELECT $1, t.tx_id, t.output_index
-               FROM UNNEST($2::text[], $3::bigint[]) 
-                   AS t(tx_id, output_index)"#,
-        )
-        .bind(id)
-        .bind(&tx_ids)
-        .bind(&output_indices)
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    async fn add_payment_result(
-        &self,
-        hash: &sha256::Hash,
-        label: &str,
-        result: &PaymentResult,
-    ) -> Result<(), AddPaymentResultError> {
-        match result {
-            PaymentResult::Success { preimage } => {
-                sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
-                    .bind(preimage.to_vec())
-                    .bind(hash.as_byte_array().to_vec())
-                    .execute(&*self.pool)
-                    .await?;
-
-                sqlx::query(r#"UPDATE payment_attempts SET success = true WHERE label = $1"#)
-                    .bind(label)
-                    .execute(&*self.pool)
-                    .await?;
-            }
-            PaymentResult::Failure { error } => {
-                sqlx::query(
-                    r#"UPDATE payment_attempts SET success = false, error = $1 WHERE label = $2"#,
-                )
-                .bind(error)
-                .bind(label)
-                .execute(&*self.pool)
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self))]
     async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapsError> {
         let maybe_row = sqlx::query(&format!(
             r#"SELECT {}
@@ -409,10 +328,11 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(attempts.into_values().collect())
     }
 
-    async fn lock_swap_payment(
+    #[instrument(level = "trace", skip(self))]
+    async fn lock_add_payment_attempt(
         &self,
         swap: &Swap,
-        payment_label: &str,
+        attempt: &PaymentAttempt,
     ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
         lock_swap_for_update(swap, &mut *tx).await?;
@@ -436,7 +356,44 @@ impl crate::swap::SwapRepository for SwapRepository {
              VALUES($1, $2)",
         )
         .bind(swap.public.hash.as_byte_array().to_vec())
-        .bind(payment_label)
+        .bind(&attempt.label)
+        .execute(&mut *tx)
+        .await?;
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO payment_attempts (swap_payment_hash
+            ,                             label
+            ,                             creation_time
+            ,                             amount_msat
+            ,                             payment_request
+            ,                             destination)
+            VALUES($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            "#,
+        )
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
+        .bind(&attempt.label)
+        .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+        .bind(attempt.amount_msat as i64)
+        .bind(&attempt.payment_request)
+        .bind(attempt.destination.serialize().to_vec())
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let id: i64 = row.try_get("id")?;
+        // Now store the used utxos.
+        let tx_ids: Vec<_> = attempt.outputs.iter().map(|o| o.txid.to_string()).collect();
+        let output_indices: Vec<_> = attempt.outputs.iter().map(|o| o.vout as i64).collect();
+        sqlx::query(
+            r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
+               SELECT $1, t.tx_id, t.output_index
+               FROM UNNEST($2::text[], $3::bigint[]) 
+                   AS t(tx_id, output_index)"#,
+        )
+        .bind(id)
+        .bind(&tx_ids)
+        .bind(&output_indices)
         .execute(&mut *tx)
         .await?;
 
@@ -475,10 +432,12 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(())
     }
 
-    async fn unlock_swap_payment(
+    #[instrument(level = "trace", skip(self))]
+    async fn unlock_add_payment_result(
         &self,
         swap: &Swap,
         payment_label: &str,
+        result: &PaymentResult,
     ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
         lock_swap_for_update(swap, &mut *tx).await?;
@@ -491,6 +450,30 @@ impl crate::swap::SwapRepository for SwapRepository {
         .bind(payment_label)
         .execute(&mut *tx)
         .await?;
+
+        match result {
+            PaymentResult::Success { preimage } => {
+                sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
+                    .bind(preimage.to_vec())
+                    .bind(swap.public.hash.as_byte_array().to_vec())
+                    .execute(&mut *tx)
+                    .await?;
+
+                sqlx::query(r#"UPDATE payment_attempts SET success = true WHERE label = $1"#)
+                    .bind(payment_label)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            PaymentResult::Failure { error } => {
+                sqlx::query(
+                    r#"UPDATE payment_attempts SET success = false, error = $1 WHERE label = $2"#,
+                )
+                .bind(error)
+                .bind(payment_label)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
 
         tx.commit().await?;
         Ok(())
@@ -615,6 +598,12 @@ impl From<sqlx::Error> for GetPaidUtxosError {
 
 impl From<sqlx::Error> for LockSwapError {
     fn from(value: sqlx::Error) -> Self {
+        LockSwapError::General(Box::new(value))
+    }
+}
+
+impl From<SystemTimeError> for LockSwapError {
+    fn from(value: SystemTimeError) -> Self {
         LockSwapError::General(Box::new(value))
     }
 }

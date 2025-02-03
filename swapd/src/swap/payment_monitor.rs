@@ -93,18 +93,14 @@ where
                 Err(LightningError::PaymentNotFound) => {
                     debug!("historical swap payment not found, removing from pending payments",);
                     self.swap_repository
-                        .add_payment_result(
-                            &attempt.payment_hash,
+                        .unlock_add_payment_result(
+                            &swap_state.swap,
                             &attempt.label,
                             &PaymentResult::Failure {
                                 error: "cancelled".to_string(),
                             },
                         )
                         .await?;
-                    let _ = self
-                        .swap_repository
-                        .unlock_swap_payment(&swap_state.swap, &attempt.label)
-                        .await;
 
                     continue;
                 }
@@ -115,30 +111,22 @@ where
                 PaymentState::Success { preimage } => {
                     debug!("historical swap payment was successful",);
                     self.swap_repository
-                        .add_payment_result(
-                            &attempt.payment_hash,
+                        .unlock_add_payment_result(
+                            &swap_state.swap,
                             &attempt.label,
                             &PaymentResult::Success { preimage },
                         )
                         .await?;
-                    let _ = self
-                        .swap_repository
-                        .unlock_swap_payment(&swap_state.swap, &attempt.label)
-                        .await;
                 }
                 PaymentState::Failure { error } => {
                     debug!("historical swap payment failed with error: {}", error,);
                     self.swap_repository
-                        .add_payment_result(
-                            &attempt.payment_hash,
+                        .unlock_add_payment_result(
+                            &swap_state.swap,
                             &attempt.label,
                             &PaymentResult::Failure { error },
                         )
                         .await?;
-                    let _ = self
-                        .swap_repository
-                        .unlock_swap_payment(&swap_state.swap, &attempt.label)
-                        .await;
                 }
                 PaymentState::Pending => pending_attempts.push(attempt.clone()),
             }
