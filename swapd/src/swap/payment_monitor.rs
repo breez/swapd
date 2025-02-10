@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, debug_span, error, field};
+use tracing::{debug, error, field};
 
 use crate::{
     lightning::{LightningClient, LightningError, PaymentResult, PaymentState},
@@ -54,7 +54,13 @@ where
             }
 
             match self.do_check_payments(&self.payment_attempts).await {
-                Ok(pending_attempts) => self.payment_attempts = pending_attempts,
+                Ok(pending_attempts) => {
+                    debug!(
+                        "historical payments checked. {} historical payments still pending",
+                        pending_attempts.len()
+                    );
+                    self.payment_attempts = pending_attempts
+                }
                 Err(e) => error!("failed to check historical payments: {:?}", e),
             }
 
@@ -75,11 +81,8 @@ where
         payment_attempts: &[PaymentAttempt],
     ) -> Result<Vec<PaymentAttempt>, Box<dyn std::error::Error>> {
         let mut pending_attempts = Vec::new();
+        debug!("checking historical payments");
         for attempt in payment_attempts {
-            debug_span!(
-                "checking_payment",
-                payment_hash = field::display(&attempt.payment_hash)
-            );
             let state = match self
                 .lightning_client
                 .get_payment_state(attempt.payment_hash, &attempt.label)
@@ -87,7 +90,10 @@ where
             {
                 Ok(state) => state,
                 Err(LightningError::PaymentNotFound) => {
-                    debug!("historical swap payment not found, removing from pending payments",);
+                    debug!(
+                        payment_hash = field::display(&attempt.payment_hash),
+                        "historical swap payment not found, removing from pending payments",
+                    );
                     self.swap_repository
                         .unlock_add_payment_result(
                             &attempt.payment_hash,
@@ -105,7 +111,10 @@ where
 
             match state {
                 PaymentState::Success { preimage } => {
-                    debug!("historical swap payment was successful",);
+                    debug!(
+                        payment_hash = field::display(&attempt.payment_hash),
+                        "historical swap payment was successful"
+                    );
                     self.swap_repository
                         .unlock_add_payment_result(
                             &attempt.payment_hash,
@@ -115,7 +124,10 @@ where
                         .await?;
                 }
                 PaymentState::Failure { error } => {
-                    debug!("historical swap payment failed with error: {}", error,);
+                    debug!(
+                        payment_hash = field::display(&attempt.payment_hash),
+                        "historical swap payment failed with error: {}", error
+                    );
                     self.swap_repository
                         .unlock_add_payment_result(
                             &attempt.payment_hash,
@@ -124,7 +136,13 @@ where
                         )
                         .await?;
                 }
-                PaymentState::Pending => pending_attempts.push(attempt.clone()),
+                PaymentState::Pending => {
+                    debug!(
+                        payment_hash = field::display(&attempt.payment_hash),
+                        "historical swap payment is still pending"
+                    );
+                    pending_attempts.push(attempt.clone())
+                }
             }
         }
 
