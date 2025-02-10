@@ -235,7 +235,7 @@ def swapd_factory(
     map_swapd_error(sf.instances, print_crash_log, "had crash.log files")
     map_swapd_error(
         sf.instances,
-        lambda s: s.rc != 0 and not s.may_fail,
+        lambda s: s.rc != 0 and s.rc is not None and not s.may_fail,
         "Swapd exited with return code {n.rc}",
     )
     if not ok:

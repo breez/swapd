@@ -28,9 +28,10 @@ import threading
 
 SWAPD_CONFIG = OrderedDict(
     {
-        "log-level": "swapd=trace,sqlx::query=debug,reqwest=debug,info",
+        "log-level": "swapd=trace,info",
         "chain-poll-interval-seconds": "1",
         "claim-poll-interval-seconds": "1",
+        "payment-poll-interval-seconds": "1",
         "preimage-poll-interval-seconds": "1",
         "whatthefee-poll-interval-seconds": "1",
         "max-swap-amount-sat": "4000000",
@@ -211,6 +212,7 @@ class SwapdServer(object):
         return SwapManagerStub(channel)
 
     def start(self, stderr_redir=False, wait_for_bitcoind_sync=True):
+        self.rc = 0
         self.daemon.start(stderr_redir=stderr_redir)
         if wait_for_bitcoind_sync:
             wait_for(self.is_synced)
@@ -229,7 +231,7 @@ class SwapdServer(object):
             self.logger.debug(f"still waiting for sync: {e}")
             return False
 
-    def stop(self, timeout=10):
+    def stop(self, timeout=10, may_fail=False):
         """Attempt to do a clean shutdown, but kill if it hangs"""
 
         # Tell the daemon to stop
@@ -239,20 +241,23 @@ class SwapdServer(object):
         except Exception:
             pass
 
-        self.rc = self.daemon.wait(timeout)
+        try:
+            self.rc = self.daemon.wait(timeout)
+        except Exception as e:
+            self.rc = None
+            self.logger.debug(f"Error waiting for swapd to stop: {e}")
+            pass
 
         # If it did not stop be more insistent
         if self.rc is None:
             self.rc = self.daemon.stop()
 
-        self.daemon.cleanup()
-
-        if self.rc != 0 and not self.may_fail:
+        if self.rc != 0 and not may_fail and not self.may_fail:
             raise ValueError("Swapd did not exit cleanly, rc={}".format(self.rc))
         else:
             return self.rc
 
-    def restart(self, timeout=10, clean=True):
+    def restart(self, timeout=10, clean=True, may_fail=False):
         """Stop and restart the swapd node.
 
         Keyword arguments:
@@ -260,9 +265,11 @@ class SwapdServer(object):
         clean: whether to issue a `stop` RPC command before killing
         """
         if clean:
-            self.stop(timeout)
+            self.stop(timeout, may_fail)
         else:
-            self.daemon.stop()
+            rc = self.daemon.stop()
+            if not may_fail and rc != 0:
+                raise ValueError("Swapd did not exit cleanly, rc={}".format(rc))
 
         self.start()
 
@@ -293,6 +300,10 @@ class SwapperGrpc(object):
     def pay_swap(self, payment_request):
         payload = swap_pb2.PaySwapRequest(payment_request=payment_request)
         return self.stub.PaySwap(payload)
+
+    def pay_swap_future(self, payment_request):
+        payload = swap_pb2.PaySwapRequest(payment_request=payment_request)
+        return self.stub.PaySwap.future(payload)
 
     def refund_swap(self, address, transaction, input_index, pub_nonce):
         payload = swap_pb2.RefundSwapRequest(
@@ -380,6 +391,7 @@ class SwapdFactory(object):
         fees=[1, 2, 3, 4, 5],
         start=True,
         expect_fail=False,
+        may_fail=False,
         **kwargs,
     ):
         grpc_port = self.get_unused_port()
@@ -413,7 +425,7 @@ class SwapdFactory(object):
             self.whatthefee,
             node,
             postgres.connectionstring,
-            False,
+            may_fail,
             grpc_port,
             internal_grpc_port,
             options,

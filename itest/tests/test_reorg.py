@@ -6,7 +6,7 @@ def test_reorg(node_factory, swapd_factory):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
     bitcoin = swapper.lightning_node.bitcoin
-    address, _, _ = create_swap(user, swapper)
+    address, payment_request, h, preimage = create_swap(user, swapper)
 
     # Send funds to the address and confirm the tx
     txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)

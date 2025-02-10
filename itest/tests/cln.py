@@ -17,23 +17,32 @@ FUNDAMOUNT = 10**6
 
 
 class ClnNode:
-    def __init__(self, node, bitcoindproxy, port, grpc_port):
+    def __init__(self, node: LightningNode, bitcoindproxy, port, grpc_port):
         self.bitcoin = bitcoindproxy
         self.port = port
         self.grpc_port = grpc_port
         self.node = node
         self.info = {}
 
+    def call(self, method, params):
+        return self.node.rpc.call(method, params)
+
     def start(self, wait_for_bitcoind_sync=True):
         try:
             self.node.start(wait_for_bitcoind_sync)
         except Exception:
-            self.stop()
+            try:
+                self.stop()
+            except:
+                pass
             raise
         self.info = {"id": self.node.info["id"]}
 
     def stop(self, timeout=10):
         return self.node.stop(timeout)
+
+    def restart(self, timeout=10):
+        return self.node.restart(timeout)
 
     def connect(self, remote_node):
         self.node.rpc.connect(remote_node.info["id"], "127.0.0.1", remote_node.port)
@@ -109,6 +118,25 @@ class ClnNode:
             for i in invoices
         ]
 
+    def list_peerchannels(self):
+        channels = self.node.rpc.listpeerchannels()["channels"]
+        return [
+            {
+                "peer_connected": c["peer_connected"],
+                "reestablished": c["reestablished"] if "reestablished" in c else False,
+                "htlcs": [
+                    {
+                        "amount_msat": h["amount_msat"],
+                        "expiry": h["expiry"],
+                        "id": h["id"],
+                        "payment_hash": h["payment_hash"],
+                    }
+                    for h in c["htlcs"]
+                ],
+            }
+            for c in channels
+        ]
+
     def list_utxos(self):
         outputs = self.node.rpc.listfunds()["outputs"]
         return [
@@ -139,6 +167,7 @@ class ClnNodeFactory(object):
         start=True,
         cleandir=True,
         wait_for_bitcoind_sync=True,
+        options={},
     ):
         node_id = self.get_node_id() if not node_id else node_id
         port = reserve_unused_port()
@@ -153,6 +182,11 @@ class ClnNodeFactory(object):
 
         db_path = os.path.join(lightning_dir, "lightningd.sqlite3")
         db = Sqlite3Db(db_path)
+
+        node_options = {"grpc-port": grpc_port, "cltv-delta": self.cltv_delta}
+        for k, v in options.items():
+            node_options[k] = v
+
         node = LightningNode(
             node_id,
             lightning_dir,
@@ -161,11 +195,9 @@ class ClnNodeFactory(object):
             False,
             port=port,
             db=db,
-            options={"grpc-port": grpc_port},
+            options=node_options,
             feerates=(15000, 11000, 7500, 3750),
         )
-
-        node.daemon.opts["cltv-delta"] = self.cltv_delta
 
         cln_node = ClnNode(node, self.bitcoind, port, grpc_port)
         if start:

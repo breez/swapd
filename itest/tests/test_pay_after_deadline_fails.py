@@ -7,7 +7,7 @@ def test_pay_after_deadline_fails(
 ):
     user = node_factory.get_node()
     swapper = swapd_factory.get_swapd()
-    address, payment_request, _ = create_swap(user, swapper)
+    address, payment_request, h, preimage = create_swap(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 

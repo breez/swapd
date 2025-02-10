@@ -8,7 +8,7 @@ def test_filtered_address(node_factory, swapd_factory):
     user_address, user_txid = user.fund_wallet(200_000)
     swapper.internal_rpc.add_address_filters([user_address])
 
-    address, payment_request, _ = create_swap(user, swapper)
+    address, payment_request, h, preimage = create_swap(user, swapper)
     user.send_onchain(address, 100_000, confirm=1)
     wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
 
