@@ -426,7 +426,8 @@ where
         {
             Ok(_) => debug!("added payment attempt, locked swap for payment"),
             Err(LockSwapError::AlreadyLocked) => {
-                return Err(Status::failed_precondition("swap is locked"))
+                trace!("swap is already locked");
+                return Err(Status::failed_precondition("swap is locked"));
             }
             Err(e) => {
                 error!("failed to add payment attempt to lock for payment: {:?}", e);
