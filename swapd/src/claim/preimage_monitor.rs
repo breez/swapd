@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, field};
 
 use crate::{
     chain::ChainRepository,
@@ -101,6 +101,8 @@ where
                 Some(preimage) => preimage,
                 None => continue,
             };
+
+            debug!(payment_hash = field::display(&hash), "found preimage");
 
             if let Err(e) = self
                 .swap_repository

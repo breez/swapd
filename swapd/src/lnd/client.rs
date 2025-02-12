@@ -11,7 +11,7 @@ use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig, Uri},
     Request, Status,
 };
-use tracing::{error, field, instrument, trace, trace_span, warn};
+use tracing::{error, field, instrument, trace, warn};
 
 use crate::lightning::{LightningError, PaymentResult, PaymentState, PreimageResult};
 
@@ -245,7 +245,13 @@ where
             return Ok(None);
         }
 
-        let preimage = hex::decode(payment.payment_preimage)
+        if payment.payment_preimage
+            == "0000000000000000000000000000000000000000000000000000000000000000"
+        {
+            return Ok(None);
+        }
+
+        let preimage = hex::decode(&payment.payment_preimage)
             .map_err(|_| LightningError::InvalidPreimage)?
             .try_into()
             .map_err(|_| LightningError::InvalidPreimage)?;
@@ -324,39 +330,36 @@ where
                     .await?;
             }
 
-            let last_attempt = match update.htlcs.last() {
-                Some(attempt) => attempt,
-                None => continue,
-            };
-            let route = match &last_attempt.route {
-                Some(route) => route,
-                None => continue,
-            };
-
-            {
-                trace_span!(
-                    "htlc update",
-                    route = field::display(hops_to_string(&route.hops))
-                );
+            if let Some(last_attempt) = update.htlcs.last() {
+                let route = last_attempt
+                    .route
+                    .as_ref()
+                    .map(|route| hops_to_string(&route.hops));
                 match last_attempt.status() {
-                    HtlcStatus::InFlight => trace!("sending htlc"),
-                    HtlcStatus::Succeeded => trace!("htlc succeeded"),
+                    HtlcStatus::InFlight => trace!(route, "sending htlc"),
+                    HtlcStatus::Succeeded => trace!(route, "htlc succeeded"),
                     HtlcStatus::Failed => match &last_attempt.failure {
                         Some(failure) => {
-                            let failure_source =
-                                if route.hops.len() > failure.failure_source_index as usize {
-                                    let hop = &route.hops[failure.failure_source_index as usize];
-                                    short_channel_id_to_string(hop.chan_id)
-                                } else {
-                                    String::from("unknown")
-                                };
+                            let failure_source = match &last_attempt.route {
+                                Some(route) => {
+                                    if route.hops.len() > failure.failure_source_index as usize {
+                                        let hop =
+                                            &route.hops[failure.failure_source_index as usize];
+                                        short_channel_id_to_string(hop.chan_id)
+                                    } else {
+                                        String::from("unknown")
+                                    }
+                                }
+                                None => String::from("unknown"),
+                            };
                             trace!(
                                 code = field::display(failure.code().as_str_name()),
                                 failure_source = field::display(failure_source),
+                                route,
                                 "htlc failed"
                             );
                         }
-                        None => trace!("htlc failed for unknown reason"),
+                        None => trace!(route, "htlc failed for unknown reason"),
                     },
                 }
             }
