@@ -51,6 +51,26 @@ impl lnd::Repository for LndRepository {
         let label: String = row.try_get("label")?;
         Ok(Some(label))
     }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn get_payment_index(&self, label: &str) -> Result<Option<u64>, RepositoryError> {
+        let row = sqlx::query(
+            r#"SELECT payment_index 
+               FROM lnd_payments
+               WHERE label = $1"#,
+        )
+        .bind(label)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        let row = match row {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        let payment_index: i64 = row.try_get("payment_index")?;
+        Ok(Some(payment_index as u64))
+    }
 }
 
 impl From<sqlx::Error> for RepositoryError {

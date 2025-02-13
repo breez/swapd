@@ -17,9 +17,9 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, LockSwapError, PaidOutpoint,
-        PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState,
-        SwapStatePaidOutpoints,
+        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, GetUnhandledPaymentAttemptsError,
+        LockSwapError, PaidOutpoint, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData,
+        SwapPublicData, SwapState, SwapStatePaidOutpoints,
     },
 };
 
@@ -108,95 +108,6 @@ impl crate::swap::SwapRepository for SwapRepository {
         .bind(swap.public.refund_script.as_bytes())
         .execute(&*self.pool)
         .await?;
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    async fn add_payment_attempt(
-        &self,
-        attempt: &PaymentAttempt,
-    ) -> Result<(), SwapPersistenceError> {
-        let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            r#"
-            INSERT INTO payment_attempts (swap_payment_hash
-            ,                             label
-            ,                             creation_time
-            ,                             amount_msat
-            ,                             payment_request
-            ,                             destination)
-            VALUES($1, $2, $3, $4, $5, $6)
-            RETURNING id
-            "#,
-        )
-        .bind(attempt.payment_hash.as_byte_array().to_vec())
-        .bind(&attempt.label)
-        .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
-        .bind(attempt.amount_msat as i64)
-        .bind(&attempt.payment_request)
-        .bind(attempt.destination.serialize().to_vec())
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let id: i64 = row.try_get("id")?;
-        // Now store the used utxos.
-        let tx_ids: Vec<_> = attempt
-            .utxos
-            .iter()
-            .map(|u| u.outpoint.txid.to_string())
-            .collect();
-        let output_indices: Vec<_> = attempt
-            .utxos
-            .iter()
-            .map(|u| u.outpoint.vout as i64)
-            .collect();
-        sqlx::query(
-            r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
-               SELECT $1, t.tx_id, t.output_index
-               FROM UNNEST($2::text[], $3::bigint[]) 
-                   AS t(tx_id, output_index)"#,
-        )
-        .bind(id)
-        .bind(&tx_ids)
-        .bind(&output_indices)
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    async fn add_payment_result(
-        &self,
-        hash: &sha256::Hash,
-        label: &str,
-        result: &PaymentResult,
-    ) -> Result<(), AddPaymentResultError> {
-        match result {
-            PaymentResult::Success { preimage } => {
-                sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
-                    .bind(preimage.to_vec())
-                    .bind(hash.as_byte_array().to_vec())
-                    .execute(&*self.pool)
-                    .await?;
-
-                sqlx::query(r#"UPDATE payment_attempts SET success = true WHERE label = $1"#)
-                    .bind(label)
-                    .execute(&*self.pool)
-                    .await?;
-            }
-            PaymentResult::Failure { error } => {
-                sqlx::query(
-                    r#"UPDATE payment_attempts SET success = false, error = $1 WHERE label = $2"#,
-                )
-                .bind(error)
-                .bind(label)
-                .execute(&*self.pool)
-                .await?;
-            }
-        }
 
         Ok(())
     }
@@ -357,13 +268,73 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(result)
     }
 
-    async fn lock_swap_payment(
+    async fn get_unhandled_payment_attempts(
         &self,
-        swap: &Swap,
-        payment_label: &str,
+    ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError> {
+        let mut rows = sqlx::query(
+            r#"SELECT pa.swap_payment_hash
+               ,      pa.label
+               ,      pa.creation_time
+               ,      pa.amount_msat
+               ,      pa.payment_request
+               ,      pa.destination
+               ,      patx.tx_id
+               ,      patx.output_index
+               FROM payment_attempts pa
+               LEFT JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
+               WHERE pa.success IS NULL
+               ORDER BY pa.creation_time"#,
+        )
+        .fetch(&*self.pool);
+
+        let mut attempts = HashMap::new();
+        while let Some(row) = rows.try_next().await? {
+            let payment_hash: Vec<u8> = row.try_get("swap_payment_hash")?;
+            let label: String = row.try_get("label")?;
+            let creation_time: i64 = row.try_get("creation_time")?;
+            let amount_msat: i64 = row.try_get("amount_msat")?;
+            let payment_request: String = row.try_get("payment_request")?;
+            let destination: Vec<u8> = row.try_get("destination")?;
+            let tx_id: Option<String> = row.try_get("tx_id")?;
+            let output_index: Option<i64> = row.try_get("output_index")?;
+
+            let payment_hash = sha256::Hash::from_slice(&payment_hash)?;
+            let creation_time = SystemTime::UNIX_EPOCH
+                .checked_add(Duration::from_secs(creation_time as u64))
+                .ok_or(GetUnhandledPaymentAttemptsError::General(
+                    "invalid timestamp".into(),
+                ))?;
+            let destination = PublicKey::from_slice(&destination)?;
+
+            let attempt = attempts
+                .entry(label.clone())
+                .or_insert_with(|| PaymentAttempt {
+                    payment_hash,
+                    label: label.clone(),
+                    creation_time,
+                    amount_msat: amount_msat as u64,
+                    payment_request: payment_request.clone(),
+                    destination,
+                    outputs: Vec::new(),
+                });
+
+            if let (Some(tx_id), Some(output_index)) = (tx_id, output_index) {
+                attempt
+                    .outputs
+                    .push(OutPoint::new(tx_id.parse()?, output_index as u32));
+            }
+        }
+
+        Ok(attempts.into_values().collect())
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn lock_add_payment_attempt(
+        &self,
+        attempt: &PaymentAttempt,
     ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(&attempt.payment_hash, &mut *tx).await?;
 
         // Payments can only be locked if there is no refund lock and no other payment lock.
         let count: i64 = sqlx::query(
@@ -371,7 +342,7 @@ impl crate::swap::SwapRepository for SwapRepository {
              FROM swap_locks 
              WHERE swap_payment_hash = $1",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
         .fetch_one(&mut *tx)
         .await?
         .try_get(0)?;
@@ -383,8 +354,45 @@ impl crate::swap::SwapRepository for SwapRepository {
             "INSERT INTO swap_locks (swap_payment_hash, payment_attempt_label)
              VALUES($1, $2)",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
-        .bind(payment_label)
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
+        .bind(&attempt.label)
+        .execute(&mut *tx)
+        .await?;
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO payment_attempts (swap_payment_hash
+            ,                             label
+            ,                             creation_time
+            ,                             amount_msat
+            ,                             payment_request
+            ,                             destination)
+            VALUES($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            "#,
+        )
+        .bind(attempt.payment_hash.as_byte_array().to_vec())
+        .bind(&attempt.label)
+        .bind(attempt.creation_time.duration_since(UNIX_EPOCH)?.as_secs() as i64)
+        .bind(attempt.amount_msat as i64)
+        .bind(&attempt.payment_request)
+        .bind(attempt.destination.serialize().to_vec())
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let id: i64 = row.try_get("id")?;
+        // Now store the used utxos.
+        let tx_ids: Vec<_> = attempt.outputs.iter().map(|o| o.txid.to_string()).collect();
+        let output_indices: Vec<_> = attempt.outputs.iter().map(|o| o.vout as i64).collect();
+        sqlx::query(
+            r#"INSERT INTO payment_attempt_tx_outputs (payment_attempt_id, tx_id, output_index)
+               SELECT $1, t.tx_id, t.output_index
+               FROM UNNEST($2::text[], $3::bigint[]) 
+                   AS t(tx_id, output_index)"#,
+        )
+        .bind(id)
+        .bind(&tx_ids)
+        .bind(&output_indices)
         .execute(&mut *tx)
         .await?;
 
@@ -392,9 +400,13 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(())
     }
 
-    async fn lock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError> {
+    async fn lock_swap_refund(
+        &self,
+        hash: &sha256::Hash,
+        refund_id: &str,
+    ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(hash, &mut *tx).await?;
 
         // Refunds can be locked with another refund lock, but not with a payment lock.
         let count: i64 = sqlx::query(
@@ -402,7 +414,7 @@ impl crate::swap::SwapRepository for SwapRepository {
              FROM swap_locks 
              WHERE swap_payment_hash = $1 AND payment_attempt_label IS NOT NULL",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .fetch_one(&mut *tx)
         .await?
         .try_get(0)?;
@@ -414,7 +426,7 @@ impl crate::swap::SwapRepository for SwapRepository {
             "INSERT INTO swap_locks (swap_payment_hash, refund_id)
              VALUES($1, $2)",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .bind(refund_id)
         .execute(&mut *tx)
         .await?;
@@ -423,36 +435,66 @@ impl crate::swap::SwapRepository for SwapRepository {
         Ok(())
     }
 
-    async fn unlock_swap_payment(
+    #[instrument(level = "trace", skip(self))]
+    async fn unlock_add_payment_result(
         &self,
-        swap: &Swap,
+        hash: &sha256::Hash,
         payment_label: &str,
+        result: &PaymentResult,
     ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(hash, &mut *tx).await?;
 
         sqlx::query(
             "DELETE FROM swap_locks
              WHERE swap_payment_hash = $1 AND payment_attempt_label = $2",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .bind(payment_label)
         .execute(&mut *tx)
         .await?;
+
+        match result {
+            PaymentResult::Success { preimage } => {
+                sqlx::query(r#"UPDATE swaps SET preimage = $1 WHERE payment_hash = $2"#)
+                    .bind(preimage.to_vec())
+                    .bind(hash.as_byte_array().to_vec())
+                    .execute(&mut *tx)
+                    .await?;
+
+                sqlx::query(r#"UPDATE payment_attempts SET success = true WHERE label = $1"#)
+                    .bind(payment_label)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            PaymentResult::Failure { error } => {
+                sqlx::query(
+                    r#"UPDATE payment_attempts SET success = false, error = $1 WHERE label = $2"#,
+                )
+                .bind(error)
+                .bind(payment_label)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
 
         tx.commit().await?;
         Ok(())
     }
 
-    async fn unlock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError> {
+    async fn unlock_swap_refund(
+        &self,
+        hash: &sha256::Hash,
+        refund_id: &str,
+    ) -> Result<(), LockSwapError> {
         let mut tx = self.pool.begin().await?;
-        lock_swap_for_update(swap, &mut *tx).await?;
+        lock_swap_for_update(hash, &mut *tx).await?;
 
         sqlx::query(
             "DELETE FROM swap_locks
              WHERE swap_payment_hash = $1 AND refund_id = $2",
         )
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .bind(refund_id)
         .execute(&mut *tx)
         .await?;
@@ -462,13 +504,13 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 }
 
-async fn lock_swap_for_update<'c, E>(swap: &Swap, executor: E) -> Result<(), LockSwapError>
+async fn lock_swap_for_update<'c, E>(hash: &sha256::Hash, executor: E) -> Result<(), LockSwapError>
 where
     E: Executor<'c, Database = Postgres>,
 {
     // Take a lock on the swap hash, so simultaneous locks will wait.
     let locked_swap_row = sqlx::query("SELECT * FROM swaps WHERE payment_hash = $1 FOR UPDATE")
-        .bind(swap.public.hash.as_byte_array().to_vec())
+        .bind(hash.as_byte_array().to_vec())
         .fetch_optional(executor)
         .await?;
     if locked_swap_row.is_none() {
@@ -567,8 +609,38 @@ impl From<sqlx::Error> for LockSwapError {
     }
 }
 
+impl From<SystemTimeError> for LockSwapError {
+    fn from(value: SystemTimeError) -> Self {
+        LockSwapError::General(Box::new(value))
+    }
+}
+
 impl From<bitcoin::hashes::hex::HexToArrayError> for GetPaidUtxosError {
     fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
         GetPaidUtxosError::General(Box::new(value))
+    }
+}
+
+impl From<sqlx::Error> for GetUnhandledPaymentAttemptsError {
+    fn from(value: sqlx::Error) -> Self {
+        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::secp256k1::Error> for GetUnhandledPaymentAttemptsError {
+    fn from(value: bitcoin::secp256k1::Error) -> Self {
+        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::hex::HexToArrayError> for GetUnhandledPaymentAttemptsError {
+    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
+        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+    }
+}
+
+impl From<bitcoin::hashes::FromSliceError> for GetUnhandledPaymentAttemptsError {
+    fn from(value: bitcoin::hashes::FromSliceError) -> Self {
+        GetUnhandledPaymentAttemptsError::General(Box::new(value))
     }
 }

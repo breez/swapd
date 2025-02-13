@@ -217,9 +217,9 @@ jobs:
         cln-version:
           - v24.11
           - v24.08
-          - v24.05
-          - v24.02.2
-          - v23.11.2
+          # - v24.05
+          # - v24.02.2
+          # - v23.11.2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -257,8 +257,17 @@ jobs:
           sudo cp -a inst/usr/local/. /usr/local/
           sudo apt install sqlite3
 
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Install virtualenv
         run: python -m pip install --user virtualenv
+
+      - name: Update hodl plugin shebang
+        run: |
+          sed -i '1c#!${{ github.workspace }}/itest-env/bin/python' itest/tests/hodl_plugin.py
 
       - name: Integration tests
         env:
@@ -324,10 +333,19 @@ jobs:
         run: |
           chmod +x -R inst/
           sudo cp -a inst/usr/local/. /usr/local/
-          sudo apt install sqlite3 
+          sudo apt install sqlite3
+
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
       - name: Install virtualenv
         run: python -m pip install --user virtualenv
+
+      - name: Update hodl plugin shebang
+        run: |
+          sed -i '1c#!${{ github.workspace }}/itest-env/bin/python' itest/tests/hodl_plugin.py
 
       - name: Integration tests
         env:

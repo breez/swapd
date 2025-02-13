@@ -413,29 +413,27 @@ where
         let label = format!("{}-{}", hash, unix_ns_now);
         match self
             .swap_repository
-            .lock_swap_payment(&swap_state.swap, &label)
-            .await
-        {
-            Ok(_) => debug!("locked swap for payment"),
-            Err(LockSwapError::AlreadyLocked) => {
-                return Err(Status::failed_precondition("swap is locked"))
-            }
-            Err(e) => {
-                error!("failed to lock swap for payment: {:?}", e);
-                return Err(Status::internal("internal error"));
-            }
-        };
-        self.swap_repository
-            .add_payment_attempt(&PaymentAttempt {
+            .lock_add_payment_attempt(&PaymentAttempt {
                 amount_msat,
                 creation_time: now,
                 label: label.clone(),
                 destination: invoice.get_payee_pub_key(),
                 payment_request: req.payment_request.clone(),
                 payment_hash: swap_state.swap.public.hash,
-                utxos: txos,
+                outputs: txos.iter().map(|utxo| utxo.outpoint).collect(),
             })
-            .await?;
+            .await
+        {
+            Ok(_) => debug!("added payment attempt, locked swap for payment"),
+            Err(LockSwapError::AlreadyLocked) => {
+                trace!("swap is already locked");
+                return Err(Status::failed_precondition("swap is locked"));
+            }
+            Err(e) => {
+                error!("failed to add payment attempt to lock for payment: {:?}", e);
+                return Err(Status::internal("internal error"));
+            }
+        };
 
         // Pay the user. After the payment succeeds, we will have paid the
         // funds, but not claimed anything onchain yet. That will happen in the
@@ -463,7 +461,7 @@ where
         // payment did succeed.
         match self
             .swap_repository
-            .add_payment_result(hash, &label, &pay_result)
+            .unlock_add_payment_result(&swap_state.swap.public.hash, &label, &pay_result)
             .await
         {
             Ok(_) => {}
@@ -477,10 +475,6 @@ where
             }
         };
 
-        let _ = self
-            .swap_repository
-            .unlock_swap_payment(&swap_state.swap, &label)
-            .await;
         let response = match pay_result {
             PaymentResult::Success { preimage: _ } => {
                 info!(
@@ -587,7 +581,7 @@ where
         // user _can_ create a new refund later, however.
         match self
             .swap_repository
-            .lock_swap_refund(&swap.swap, &refund_id)
+            .lock_swap_refund(&swap.swap.public.hash, &refund_id)
             .await
         {
             Ok(_) => debug!("locked swap for refund."),
@@ -609,7 +603,7 @@ where
             Ok(true) => {
                 let _ = self
                     .swap_repository
-                    .unlock_swap_refund(&swap.swap, &refund_id)
+                    .unlock_swap_refund(&swap.swap.public.hash, &refund_id)
                     .await;
                 return Err(Status::failed_precondition("swap is locked"));
             }
@@ -617,7 +611,7 @@ where
                 error!("failed to check for pending or complete payment: {:?}", e);
                 let _ = self
                     .swap_repository
-                    .unlock_swap_refund(&swap.swap, &refund_id)
+                    .unlock_swap_refund(&swap.swap.public.hash, &refund_id)
                     .await;
                 return Err(Status::internal("internal error"));
             }

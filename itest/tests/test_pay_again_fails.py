@@ -4,7 +4,7 @@ import grpc
 
 def test_pay_again_fails(node_factory, swapd_factory):
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, payment_request, h = create_swap(user, swapper)
+    address, payment_request, h, preimage = create_swap(user, swapper)
     user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 

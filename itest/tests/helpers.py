@@ -37,6 +37,8 @@ __all__ = [
     "cltv_delta",
 ]
 
+hodl_plugin_path = os.path.join(os.path.dirname(__file__), "hodl_plugin.py")
+
 
 def setup_user_router_swapper(node_factory, swapd_factory, swapd_opts=None):
     user = node_factory.get_node()
@@ -47,9 +49,19 @@ def setup_user_router_swapper(node_factory, swapd_factory, swapd_opts=None):
     return user, router, swapper
 
 
-def setup_user_and_swapper(node_factory, swapd_factory, swapd_opts=None):
-    user = node_factory.get_node()
-    swapper = swapd_factory.get_swapd(options=swapd_opts)
+def setup_user_and_swapper(
+    node_factory,
+    swapd_factory,
+    swapd_opts=None,
+    swapd_may_fail=False,
+    hodl_plugin=False,
+):
+    user_opts = {}
+    if hodl_plugin:
+        user_opts["plugin"] = hodl_plugin_path
+
+    user = node_factory.get_node(options=user_opts)
+    swapper = swapd_factory.get_swapd(options=swapd_opts, may_fail=swapd_may_fail)
     swapper.lightning_node.open_channel(user, 1000000)
     return user, swapper
 
@@ -84,9 +96,19 @@ def create_swap_extended(user: ClnNode, swapper: SwapdServer, amount=100_000_000
         description="test",
         preimage=preimage,
     )
-    return address, payment_request, h, refund_privkey, claim_pubkey, lock_time
+    return (
+        address,
+        payment_request,
+        h,
+        preimage,
+        refund_privkey,
+        claim_pubkey,
+        lock_time,
+    )
 
 
 def create_swap(user: ClnNode, swapper: SwapdServer, amount=100_000_000):
-    address, payment_request, h, _, _, _ = create_swap_extended(user, swapper, amount)
-    return address, payment_request, h
+    address, payment_request, h, preimage, _, _, _ = create_swap_extended(
+        user, swapper, amount
+    )
+    return address, payment_request, h, preimage

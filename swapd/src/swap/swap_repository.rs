@@ -3,7 +3,6 @@ use std::{collections::HashMap, time::SystemTime};
 use bitcoin::{hashes::sha256, secp256k1, Address, OutPoint};
 use thiserror::Error;
 
-use crate::chain::Txo;
 use crate::lightning::PaymentResult;
 
 use super::{swap_service::Swap, SwapState};
@@ -46,12 +45,18 @@ pub enum GetSwapsError {
     General(Box<dyn std::error::Error + Sync + Send>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+pub enum GetUnhandledPaymentAttemptsError {
+    #[error("{0}")]
+    General(Box<dyn std::error::Error + Sync + Send>),
+}
+
+#[derive(Clone, Debug)]
 pub struct PaymentAttempt {
     pub creation_time: SystemTime,
     pub label: String,
     pub payment_hash: sha256::Hash,
-    pub utxos: Vec<Txo>,
+    pub outputs: Vec<OutPoint>,
     pub amount_msat: u64,
     pub destination: secp256k1::PublicKey,
     pub payment_request: String,
@@ -72,16 +77,6 @@ pub struct PaidOutpoint {
 #[async_trait::async_trait]
 pub trait SwapRepository {
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError>;
-    async fn add_payment_attempt(
-        &self,
-        attempt: &PaymentAttempt,
-    ) -> Result<(), SwapPersistenceError>;
-    async fn add_payment_result(
-        &self,
-        hash: &sha256::Hash,
-        label: &str,
-        result: &PaymentResult,
-    ) -> Result<(), AddPaymentResultError>;
     async fn get_swap_by_hash(&self, hash: &sha256::Hash) -> Result<SwapState, GetSwapsError>;
     async fn get_swap_by_address(&self, address: &Address) -> Result<SwapState, GetSwapsError>;
     async fn get_swap_by_payment_request(
@@ -96,16 +91,25 @@ pub trait SwapRepository {
         &self,
         addresses: &[Address],
     ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError>;
-    async fn lock_swap_payment(
+    async fn get_unhandled_payment_attempts(
         &self,
-        swap: &Swap,
-        payment_label: &str,
-    ) -> Result<(), LockSwapError>;
-    async fn lock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError>;
-    async fn unlock_swap_payment(
+    ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError>;
+    async fn lock_add_payment_attempt(&self, attempt: &PaymentAttempt)
+        -> Result<(), LockSwapError>;
+    async fn lock_swap_refund(
         &self,
-        swap: &Swap,
-        payment_label: &str,
+        hash: &sha256::Hash,
+        refund_id: &str,
     ) -> Result<(), LockSwapError>;
-    async fn unlock_swap_refund(&self, swap: &Swap, refund_id: &str) -> Result<(), LockSwapError>;
+    async fn unlock_add_payment_result(
+        &self,
+        hash: &sha256::Hash,
+        payment_label: &str,
+        result: &PaymentResult,
+    ) -> Result<(), LockSwapError>;
+    async fn unlock_swap_refund(
+        &self,
+        hash: &sha256::Hash,
+        refund_id: &str,
+    ) -> Result<(), LockSwapError>;
 }

@@ -17,7 +17,7 @@ def test_claim_rbf_close_to_deadline(node_factory, swapd_factory, lock_time):
         },
     )
     expected_outputs = len(swapper.lightning_node.list_utxos()) + 1
-    address, payment_request, h = create_swap(user, swapper)
+    address, payment_request, h, preimage = create_swap(user, swapper)
     txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 
@@ -70,7 +70,7 @@ def test_claim_rbf_close_to_deadline(node_factory, swapd_factory, lock_time):
 def test_claim_rbf_new_feerate(node_factory, swapd_factory):
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
     expected_outputs = len(swapper.lightning_node.list_utxos()) + 1
-    address, payment_request, h = create_swap(user, swapper)
+    address, payment_request, h, preimage = create_swap(user, swapper)
     txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
     user.bitcoin.generate_block(1)
 

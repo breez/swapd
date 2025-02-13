@@ -96,6 +96,18 @@ class LND(TailableProc):
             self.wait_for_log("Waiting for wallet encryption password")
         logging.info("LND started")
 
+    def stop(self, timeout=10):
+        self.proc.terminate()
+
+        # Now give it some time to react to the signal
+        rc = self.proc.wait(timeout)
+
+        if rc is None:
+            self.proc.kill()
+
+        self.proc.wait()
+        return self.proc.returncode
+
     def wait(self, timeout=TIMEOUT):
         """Wait for the daemon to stop for up to timeout seconds
 
@@ -200,6 +212,10 @@ class LndNode(object):
             self.rc = self.daemon.stop()
 
         return self.rc
+
+    def restart(self, timeout=TIMEOUT):
+        self.stop(timeout)
+        self.start()
 
     def connect(self, remote_node):
         self.rpc.connect_peer(

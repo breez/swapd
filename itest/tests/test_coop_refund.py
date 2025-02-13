@@ -158,7 +158,7 @@ def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
 def test_cooperative_refund_then_pay_failure(node_factory, swapd_factory):
     setup("regtest")
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, payment_request, h, refund_privkey, claim_pubkey, lock_time = (
+    address, payment_request, h, preimage, refund_privkey, claim_pubkey, lock_time = (
         create_swap_extended(user, swapper)
     )
     to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)
@@ -187,7 +187,7 @@ def test_cooperative_refund_then_pay_failure(node_factory, swapd_factory):
 def test_pay_then_cooperative_refund_failure(node_factory, swapd_factory):
     setup("regtest")
     user, swapper = setup_user_and_swapper(node_factory, swapd_factory)
-    address, payment_request, h, refund_privkey, claim_pubkey, lock_time = (
+    address, payment_request, h, preimage, refund_privkey, claim_pubkey, lock_time = (
         create_swap_extended(user, swapper)
     )
     to_spend_txid = user.bitcoin.rpc.sendtoaddress(address, 100_000 / 10**8)

@@ -1,10 +1,16 @@
 use bitcoin::hashes::sha256;
+use thiserror::Error;
 use tonic::Status;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum LightningError {
+    #[error("connection failed")]
     ConnectionFailed,
+    #[error("invalid preimage")]
     InvalidPreimage,
+    #[error("payment not found")]
+    PaymentNotFound,
+    #[error("general: {0}")]
     General(Status),
 }
 
@@ -25,6 +31,13 @@ pub enum PaymentResult {
 }
 
 #[derive(Debug)]
+pub enum PaymentState {
+    Success { preimage: [u8; 32] },
+    Failure { error: String },
+    Pending,
+}
+
+#[derive(Debug)]
 pub struct PreimageResult {
     pub preimage: [u8; 32],
     pub label: String,
@@ -32,6 +45,11 @@ pub struct PreimageResult {
 
 #[async_trait::async_trait]
 pub trait LightningClient {
+    async fn get_payment_state(
+        &self,
+        hash: sha256::Hash,
+        label: &str,
+    ) -> Result<PaymentState, LightningError>;
     async fn get_preimage(
         &self,
         hash: sha256::Hash,

@@ -13,12 +13,13 @@ use tonic::{
 use tracing::{debug, error, instrument, warn};
 
 use crate::lightning::{
-    LightningClient, LightningError, PaymentRequest, PaymentResult, PreimageResult,
+    LightningClient, LightningError, PaymentRequest, PaymentResult, PaymentState, PreimageResult,
 };
 
 use super::cln_api::{
-    listsendpays_request::ListsendpaysStatus, node_client::NodeClient, pay_response::PayStatus,
-    Amount, ListpaysRequest, ListsendpaysRequest, PayRequest, WaitsendpayRequest,
+    listpays_pays::ListpaysPaysStatus, listsendpays_request::ListsendpaysStatus,
+    node_client::NodeClient, pay_response::PayStatus, Amount, ListpaysRequest, ListsendpaysRequest,
+    PayRequest, WaitsendpayRequest,
 };
 
 pub struct ClientConnection {
@@ -65,6 +66,42 @@ impl Client {
 
 #[async_trait::async_trait]
 impl LightningClient for Client {
+    #[instrument(level = "trace", skip(self))]
+    async fn get_payment_state(
+        &self,
+        hash: sha256::Hash,
+        label: &str,
+    ) -> Result<PaymentState, LightningError> {
+        let mut client = self.get_client().await?;
+        let resp = client
+            .list_pays(ListpaysRequest {
+                payment_hash: Some(hash.as_byte_array().to_vec()),
+                ..Default::default()
+            })
+            .await?
+            .into_inner();
+
+        let payment = resp
+            .pays
+            .into_iter()
+            .find(|pay| pay.label() == label)
+            .ok_or(LightningError::PaymentNotFound)?;
+        let state = match payment.status() {
+            ListpaysPaysStatus::Complete => PaymentState::Success {
+                preimage: payment.preimage.unwrap().try_into().map_err(|e| {
+                    warn!("failed to parse preimage from cln: {:?}", e);
+                    LightningError::InvalidPreimage
+                })?,
+            },
+            ListpaysPaysStatus::Pending => PaymentState::Pending,
+            ListpaysPaysStatus::Failed => PaymentState::Failure {
+                error: "payment failed".to_string(),
+            },
+        };
+
+        Ok(state)
+    }
+
     #[instrument(level = "trace", skip(self))]
     async fn get_preimage(
         &self,
