@@ -13,7 +13,10 @@ use tonic::{
 };
 use tracing::{error, field, instrument, trace, warn};
 
-use crate::lightning::{LightningError, PaymentResult, PaymentState, PreimageResult};
+use crate::{
+    lightning::{LightningError, PaymentResult, PaymentState, PreimageResult},
+    lnd::routerrpc::ResetMissionControlRequest,
+};
 
 use super::{
     lnrpc::{
@@ -304,6 +307,9 @@ where
         request: crate::lightning::PaymentRequest,
     ) -> Result<PaymentResult, LightningError> {
         let mut router_client = self.get_router_client().await?;
+        router_client
+            .reset_mission_control(ResetMissionControlRequest::default())
+            .await?;
         let mut stream = router_client
             .send_payment_v2(SendPaymentRequest {
                 payment_request: request.bolt11,
