@@ -7,6 +7,18 @@ plugin = Plugin()
 lock = threading.Lock()
 event_listeners = []
 resolutions = []
+resolved = 0
+
+
+@plugin.method("hodl_count")
+def hodl_count(plugin):
+    """Resolves all htlcs currently pending."""
+    count = 0
+    with lock:
+        count = len(event_listeners) - resolved
+
+    plugin.log("hodl_count called, count: {}".format(count))
+    return {"count": count}
 
 
 @plugin.method("resolve")
@@ -48,6 +60,8 @@ def on_htlc_accepted(onion, htlc, plugin, request, **kwargs):
 def hodl_htlc(plugin, request, resolve_called, index):
     plugin.log("hodl_htlc called")
     resolve_called.wait()
+    global resolved
+    resolved += 1
     request.set_result(resolutions[index])
 
 

@@ -24,7 +24,7 @@ def test_inflight_restart_swapd_payment_success(node_factory, swapd_factory):
     threading.Thread(target=pay_swap_in_background).start()
 
     # The user will hold the htlc until resolve is called
-    wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) > 0)
+    wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
     swapper.restart(timeout=1, may_fail=True)
 
     def get_info_works():
@@ -60,7 +60,7 @@ def test_inflight_restart_swapd_payment_retry(node_factory, swapd_factory):
     future = swapper.rpc.pay_swap_future(payment_request)
 
     # The user will hold the htlc until resolve is called
-    wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) > 0)
+    wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
     swapper.restart(timeout=1, may_fail=True)
     future.cancel()
 
@@ -80,7 +80,7 @@ def test_inflight_restart_swapd_payment_retry(node_factory, swapd_factory):
     wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) == 0)
 
     def resolve_when_received(user):
-        wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) > 0)
+        wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
         user.call("resolve", {})
 
     def pay_swap_after_unlock():
@@ -120,7 +120,7 @@ def test_inflight_restart_cln_payment_success(node_factory, swapd_factory):
     threading.Thread(target=pay_swap_in_background).start()
 
     # The user will hold the htlc until resolve is called
-    wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) > 0)
+    wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
     swapper.lightning_node.restart()
 
     user.connect(swapper.lightning_node)
@@ -156,7 +156,7 @@ def test_inflight_restart_cln_payment_retry(node_factory, swapd_factory):
     future = swapper.rpc.pay_swap_future(payment_request)
 
     # The user will hold the htlc until resolve is called
-    wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) > 0)
+    wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
     swapper.lightning_node.restart(timeout=1)
     future.cancel()
 
@@ -175,7 +175,7 @@ def test_inflight_restart_cln_payment_retry(node_factory, swapd_factory):
     wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) == 0)
 
     def resolve_when_received(user):
-        wait_for(lambda: len(user.list_peerchannels()[0]["htlcs"]) > 0)
+        wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
         user.call("resolve", {})
 
     threading.Thread(target=resolve_when_received, args=(user,)).start()
