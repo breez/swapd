@@ -123,7 +123,14 @@ def test_inflight_restart_cln_payment_success(node_factory, swapd_factory):
     wait_for(lambda: user.call("hodl_count", {})["count"] > 0)
     swapper.lightning_node.restart()
 
-    user.connect(swapper.lightning_node)
+    def connect():
+        try:
+            user.connect(swapper.lightning_node)
+            return True
+        except:
+            return False
+
+    wait_for(connect)
 
     def reconnected():
         c = user.list_peerchannels()[0]
@@ -160,7 +167,14 @@ def test_inflight_restart_cln_payment_retry(node_factory, swapd_factory):
     swapper.lightning_node.restart(timeout=1)
     future.cancel()
 
-    user.connect(swapper.lightning_node)
+    def connect():
+        try:
+            user.connect(swapper.lightning_node)
+            return True
+        except:
+            return False
+
+    wait_for(connect)
 
     def reconnected():
         c = user.list_peerchannels()[0]
