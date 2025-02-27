@@ -11,7 +11,7 @@ use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig, Uri},
     Request, Status,
 };
-use tracing::{error, field, instrument, trace, warn};
+use tracing::{debug, error, field, instrument, trace, warn};
 
 use crate::{
     lightning::{LightningError, PaymentResult, PaymentState, PreimageResult},
@@ -177,6 +177,12 @@ where
         // TODO: The part below might fetch the latest version of a payment, rather than the one requested by the label. What to do?
         //       That might interfere with the active locks that shouldn't be removed.
         if payment.is_none() {
+            debug!(
+                label,
+                hash = field::display(&hash),
+                "payment for payment index {:?} is None.",
+                payment_index
+            );
             let res = router_client
                 .track_payment_v2(TrackPaymentRequest {
                     payment_hash: hash.as_byte_array().to_vec(),
@@ -199,6 +205,14 @@ where
                     .message()
                     .await?
                     .ok_or(LightningError::ConnectionFailed)?,
+            );
+
+            debug!(
+                label,
+                hash = field::display(&hash),
+                payment = field::debug(&payment),
+                "got payment from track_payment_v2 for payment index {:?}",
+                payment_index
             );
         }
 
