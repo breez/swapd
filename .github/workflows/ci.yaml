@@ -87,7 +87,7 @@ jobs:
     strategy:
       matrix:
         cln:
-          - version: v25.02rc2
+          - version: v25.02
             rust-version: stable
             org: ElementsProject
             repo: lightning
@@ -219,7 +219,7 @@ jobs:
     strategy:
       matrix:
         cln-version:
-          - v25.02rc2
+          - v25.02
           - v24.11
           - v24.08
           # - v24.05
