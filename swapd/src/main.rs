@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
@@ -6,11 +6,17 @@ use chain::{ChainMonitor, FallbackFeeEstimator};
 use chain_filter::ChainFilterImpl;
 use claim::{ClaimMonitor, ClaimMonitorParams, ClaimService, PreimageMonitor};
 use clap::Parser;
+use figment::{
+    providers::{Env, Format, Serialized, Yaml},
+    Figment,
+};
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use lightning::LightningClient;
 use postgresql::LndRepository;
 use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
 use reqwest::Url;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use sqlx::{PgPool, Pool, Postgres};
 use swap::{HistoricalPaymentMonitor, RandomPrivateKeyProvider, RingRandomProvider, SwapService};
 use tokio::signal;
@@ -44,6 +50,25 @@ impl From<std::string::String> for FileOrCert {
     }
 }
 
+impl Serialize for FileOrCert {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileOrCert {
+    fn deserialize<D>(deserializer: D) -> Result<FileOrCert, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(FileOrCert(s))
+    }
+}
+
 impl FileOrCert {
     async fn resolve(&self) -> String {
         match tokio::fs::read_to_string(&self.0).await {
@@ -53,19 +78,23 @@ impl FileOrCert {
     }
 }
 
-#[derive(Clone, Parser, Debug)]
+#[serde_as]
+#[derive(Clone, Parser, Debug, Serialize, Deserialize)]
 #[command(version, about, long_about = None)]
 struct Args {
+    #[arg(long, default_value = "swapd.conf")]
+    pub config: PathBuf,
+
     /// Address the grpc server will listen on.
-    #[arg(long)]
+    #[arg(long, default_value = "127.0.0.1:58049")]
     pub address: core::net::SocketAddr,
 
     /// Address the internal grpc server will listen on.
-    #[arg(long)]
+    #[arg(long, default_value = "127.0.0.1:58050")]
     pub internal_address: core::net::SocketAddr,
 
     /// Maximum amount allowed for swaps.
-    #[arg(long, default_value = "4_000_000")]
+    #[arg(long, default_value = "4000000")]
     pub max_swap_amount_sat: u64,
 
     /// Locktime for swaps. This is the time between creation of the swap
@@ -88,6 +117,7 @@ struct Args {
 
     /// Bitcoin network. Valid values are bitcoin, testnet, signet, regtest.
     #[arg(long, default_value = "bitcoin")]
+    #[serde_as(as = "DisplayFromStr")]
     pub network: Network,
 
     /// Amount of satoshis below which an output is considered dust.
@@ -96,6 +126,7 @@ struct Args {
 
     /// cln only: Address to the cln grpc api.
     #[arg(long)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub cln_grpc_address: Option<Uri>,
 
     /// cln only: Client key for grpc access. Can either be a file path or the
@@ -118,6 +149,7 @@ struct Args {
 
     /// lnd only: Address to the lnd grpc api.
     #[arg(long)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub lnd_grpc_address: Option<Uri>,
 
     /// lnd only: CA cert for grpc access. Can either be a file path or the
@@ -137,19 +169,19 @@ struct Args {
     pub log_level: String,
 
     /// Connectionstring to the postgres database.
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     pub db_url: String,
 
     /// Address to the bitcoind rpc.
-    #[arg(long)]
+    #[arg(long, default_value = "http://localhost:8332")]
     pub bitcoind_rpc_address: String,
 
     /// Bitcoind rpc username.
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     pub bitcoind_rpc_user: String,
 
     /// Bitcoind rpc password.
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     pub bitcoind_rpc_password: String,
 
     /// Polling interval between chain syncs.
@@ -178,6 +210,7 @@ struct Args {
 
     /// Url to whatthefee.io.
     #[arg(long, default_value = "https://whatthefee.io/data.json")]
+    #[serde_as(as = "DisplayFromStr")]
     pub whatthefee_url: Url,
 
     /// If this flag is set, the claim logic will not run in this process. It
@@ -222,11 +255,19 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let config_file = std::fs::canonicalize(&args.config)?;
+    let args: Args = Figment::new()
+        .merge(Serialized::defaults(args))
+        .merge(Yaml::file(&config_file))
+        .merge(Env::prefixed("SWAPD_"))
+        .extract()?;
+
     tracing_subscriber::registry()
         .with(EnvFilter::new(&args.log_level))
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .init();
 
+    info!("starting swapd with config file: {}", config_file.display());
     let pgpool = Arc::new(
         PgPool::connect(&args.db_url)
             .await

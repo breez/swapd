@@ -7,6 +7,7 @@ edition = "2021"
 async-trait = "0.1.83"
 bitcoin = "0.32.5"
 clap = { workspace = true, features = ["derive"] }
+figment = { version = "0.10.19", features = ["env", "yaml"] }
 futures = "0.3.31"
 futures-util = "0.3.31"
 hex = { workspace = true }
@@ -18,6 +19,7 @@ ring = "0.17.8"
 secp256k1 = { git = "https://github.com/rust-bitcoin/rust-secp256k1", rev = "1cc7410df436b73d06db3c8ff7cbb29a78916b06"}
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_with = "3.12.0"
 sqlx = { version = "0.8.2", features = ["postgres", "runtime-tokio", "tls-native-tls"] }
 thiserror = "2.0.4"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
