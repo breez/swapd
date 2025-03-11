@@ -255,19 +255,24 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let config_file = std::fs::canonicalize(&args.config)?;
-    let args: Args = Figment::new()
-        .merge(Serialized::defaults(args))
-        .merge(Yaml::file(&config_file))
-        .merge(Env::prefixed("SWAPD_"))
-        .extract()?;
+    let config_file = std::fs::canonicalize(&args.config).ok();
+    let mut figment = Figment::new().merge(Serialized::defaults(args));
+    if let Some(config_file) = &config_file {
+        figment = figment.merge(Yaml::file(config_file));
+    }
+
+    let args: Args = figment.merge(Env::prefixed("SWAPD_")).extract()?;
 
     tracing_subscriber::registry()
         .with(EnvFilter::new(&args.log_level))
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .init();
 
-    info!("starting swapd with config file: {}", config_file.display());
+    match &config_file {
+        Some(config_file) => info!("starting swapd with config file: {}", config_file.display()),
+        None => info!("starting swapd without config file"),
+    }
+
     let pgpool = Arc::new(
         PgPool::connect(&args.db_url)
             .await
