@@ -7,7 +7,7 @@ edition = "2021"
 async-trait = "0.1.83"
 bitcoin = "0.32.5"
 clap = { workspace = true, features = ["derive"] }
-figment = { version = "0.10.19", features = ["env", "yaml"] }
+figment = { version = "0.10.19", features = ["env", "toml"] }
 futures = "0.3.31"
 futures-util = "0.3.31"
 hex = { workspace = true }

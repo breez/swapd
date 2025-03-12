@@ -7,7 +7,7 @@ use chain_filter::ChainFilterImpl;
 use claim::{ClaimMonitor, ClaimMonitorParams, ClaimService, PreimageMonitor};
 use clap::Parser;
 use figment::{
-    providers::{Env, Format, Serialized, Yaml},
+    providers::{Env, Format, Serialized, Toml},
     Figment,
 };
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
@@ -258,7 +258,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = std::fs::canonicalize(&args.config).ok();
     let mut figment = Figment::new().merge(Serialized::defaults(args));
     if let Some(config_file) = &config_file {
-        figment = figment.merge(Yaml::file(config_file));
+        figment = figment.merge(Toml::file(config_file));
     }
 
     let args: Args = figment.merge(Env::prefixed("SWAPD_")).extract()?;
