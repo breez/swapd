@@ -1,8 +1,12 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use bitcoin::{block::Bip34Error, Address, Block, Network, OutPoint};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use tracing::{debug, error, field, info};
+use tracing::{debug, error, field, info, trace};
 
 use crate::chain::{AddressUtxo, ChainClient, ChainRepository, SpentTxo, Txo};
 
@@ -222,8 +226,17 @@ where
                 "processing block {}, height {}",
                 current_block.hash, current_block.height
             );
+            let start = SystemTime::now();
             let block = self.chain_client.get_block(&current_block.hash).await?;
             self.process_block(&block).await?;
+            if let Ok(elapsed) = start.elapsed() {
+                trace!(
+                    "processed block {}, height {} in {}s",
+                    current_block.hash,
+                    current_block.height,
+                    elapsed.as_secs_f32()
+                );
+            }
         }
 
         existing_chain.retip(&new_chain)?;
