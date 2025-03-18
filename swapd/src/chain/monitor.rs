@@ -297,17 +297,8 @@ where
                 block_height, block_hash, utxo.utxo.outpoint, utxo.address, utxo.utxo.tx_out.value
             );
         }
-        for spent_txo in &spent_txos {
-            info!(
-                "block {} ({}) contains tx {} spending output {} in input {}",
-                block_height,
-                block_hash,
-                spent_txo.spending_tx,
-                spent_txo.outpoint,
-                spent_txo.spending_input_index,
-            );
-        }
-        self.chain_repository
+        let spent_txos = self
+            .chain_repository
             .add_block(
                 &BlockHeader {
                     hash: block_hash,
@@ -318,6 +309,17 @@ where
                 &spent_txos,
             )
             .await?;
+
+        for spent_txo in &spent_txos {
+            info!(
+                "block {} ({}) contains tx {} spending output {} in input {}",
+                block_height,
+                block_hash,
+                spent_txo.spending_tx,
+                spent_txo.outpoint,
+                spent_txo.spending_input_index,
+            );
+        }
         Ok(())
     }
 }

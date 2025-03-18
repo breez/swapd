@@ -31,7 +31,7 @@ pub trait ChainRepository {
         block: &BlockHeader,
         tx_outputs: &[AddressUtxo],
         tx_inputs: &[SpentTxo],
-    ) -> Result<(), ChainRepositoryError>;
+    ) -> Result<Vec<SpentTxo>, ChainRepositoryError>;
     async fn add_watch_address(&self, address: &Address) -> Result<(), ChainRepositoryError>;
     async fn filter_watch_addresses(
         &self,

@@ -85,14 +85,14 @@ impl ChainRepository {
         &self,
         tx: &mut PgConnection,
         txos: &[SpentTxo],
-    ) -> Result<(), ChainRepositoryError> {
+    ) -> Result<Vec<SpentTxo>, ChainRepositoryError> {
         let tx_ids: Vec<_> = txos.iter().map(|u| u.outpoint.txid.to_string()).collect();
         let tx_output_indices: Vec<_> = txos.iter().map(|u| u.outpoint.vout as i64).collect();
         let spending_tx_ids: Vec<_> = txos.iter().map(|u| u.spending_tx.to_string()).collect();
         let spending_tx_input_indices: Vec<_> =
             txos.iter().map(|u| u.spending_input_index as i64).collect();
 
-        sqlx::query(
+        let mut rows = sqlx::query(
             r#"INSERT INTO tx_inputs (
                    tx_id
                ,   output_index
@@ -114,16 +114,31 @@ impl ChainRepository {
                ,   spending_input_index)
                INNER JOIN tx_outputs o 
                    ON i.tx_id = o.tx_id AND i.output_index = o.output_index
-               ON CONFLICT DO NOTHING"#,
+               ON CONFLICT DO NOTHING
+               RETURNING tx_id, output_index, spending_tx_id, spending_input_index"#,
         )
         .bind(&tx_ids)
         .bind(&tx_output_indices)
         .bind(&spending_tx_ids)
         .bind(&spending_tx_input_indices)
-        .execute(tx)
-        .await?;
+        .fetch(tx);
 
-        Ok(())
+        let mut result: Vec<SpentTxo> = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let tx_id: String = row.try_get("tx_id")?;
+            let output_index: i64 = row.try_get("output_index")?;
+            let spending_tx_id: String = row.try_get("spending_tx_id")?;
+            let spending_input_index: i64 = row.try_get("spending_input_index")?;
+            let outpoint = OutPoint::new(tx_id.parse()?, output_index as u32);
+
+            result.push(SpentTxo {
+                outpoint,
+                spending_tx: spending_tx_id.parse()?,
+                spending_input_index: spending_input_index as u32,
+            });
+        }
+
+        Ok(result)
     }
 }
 
@@ -135,7 +150,7 @@ impl chain::ChainRepository for ChainRepository {
         block: &BlockHeader,
         tx_outputs: &[AddressUtxo],
         tx_inputs: &[SpentTxo],
-    ) -> Result<(), ChainRepositoryError> {
+    ) -> Result<Vec<SpentTxo>, ChainRepositoryError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"INSERT INTO blocks (block_hash, prev_block_hash, height)
@@ -153,7 +168,7 @@ impl chain::ChainRepository for ChainRepository {
         // NOTE: This also marks outputs as spent that were added in the current
         // transaction (as long as the default transaction isolation level is
         // not 'read uncommitted', which would be strange)
-        self.mark_spent(&mut tx, tx_inputs).await?;
+        let spent_txos = self.mark_spent(&mut tx, tx_inputs).await?;
 
         // correlate the transactions to the blocks
         let mut txns: Vec<_> = tx_outputs
@@ -187,7 +202,7 @@ impl chain::ChainRepository for ChainRepository {
         .await?;
 
         tx.commit().await?;
-        Ok(())
+        Ok(spent_txos)
     }
 
     #[instrument(level = "trace", skip(self))]
