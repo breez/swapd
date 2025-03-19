@@ -9,7 +9,7 @@ from pyln.testing.utils import (
     reserve_unused_port,
     wait_for,
 )
-from swap_pb2_grpc import SwapperStub
+from swap_pb2_grpc import TaprootSwapperStub
 from swap_internal_pb2_grpc import SwapManagerStub
 from pathlib import Path
 from flask import Flask, request
@@ -197,7 +197,7 @@ class SwapdServer(object):
         channel = grpc.insecure_channel(
             address,
         )
-        return SwapperStub(channel)
+        return TaprootSwapperStub(channel)
 
     @property
     def internal_grpc(self):
@@ -288,7 +288,7 @@ class SwapperGrpc(object):
         self.logger = logging.getLogger("SwapGrpc")
         self.logger.debug(f"Connecting to grpc interface at {host}:{port}")
         self.channel = grpc.insecure_channel(f"{host}:{port}")
-        self.stub = SwapperStub(self.channel)
+        self.stub = TaprootSwapperStub(self.channel)
 
     def create_swap(self, lightning_node, refund_pubkey, hash):
         node_id = lightning_node.info["id"]
