@@ -13,7 +13,9 @@ use figment::{
 use internal_server::internal_swap_api::swap_manager_server::SwapManagerServer;
 use lightning::LightningClient;
 use postgresql::LndRepository;
-use public_server::{swap_api::swapper_server::SwapperServer, SwapServer, SwapServerParams};
+use public_server::{
+    swap_api::taproot_swapper_server::TaprootSwapperServer, SwapServer, SwapServerParams,
+};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -488,7 +490,7 @@ where
     }
     if !args.no_servers {
         let server_token = token.clone();
-        let swapper_server = SwapperServer::new(SwapServer::new(SwapServerParams {
+        let swapper_server = TaprootSwapperServer::new(SwapServer::new(SwapServerParams {
             network: args.network,
             max_swap_amount_sat: args.max_swap_amount_sat,
             min_confirmations: args.min_confirmations,

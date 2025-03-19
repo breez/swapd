@@ -1,7 +1,7 @@
 syntax = "proto3";
 package swap;
 
-service Swapper {
+service TaprootSwapper {
     rpc CreateSwap (CreateSwapRequest) returns (CreateSwapResponse) {}
     rpc PaySwap (PaySwapRequest) returns (PaySwapResponse) {}
     rpc RefundSwap (RefundSwapRequest) returns (RefundSwapResponse) {}

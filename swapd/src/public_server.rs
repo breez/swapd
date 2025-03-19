@@ -30,7 +30,7 @@ use crate::swap::{
     GetSwapsError, PrivateKeyProvider, SwapPersistenceError, SwapRepository, SwapService,
 };
 use swap_api::{
-    swapper_server::Swapper, CreateSwapRequest, CreateSwapResponse, PaySwapRequest,
+    taproot_swapper_server::TaprootSwapper, CreateSwapRequest, CreateSwapResponse, PaySwapRequest,
     PaySwapResponse, RefundSwapRequest, RefundSwapResponse, SwapParameters, SwapParametersRequest,
     SwapParametersResponse,
 };
@@ -148,7 +148,7 @@ where
     }
 }
 #[tonic::async_trait]
-impl<C, CF, CR, L, P, R, RP, F> Swapper for SwapServer<C, CF, CR, L, P, R, RP, F>
+impl<C, CF, CR, L, P, R, RP, F> TaprootSwapper for SwapServer<C, CF, CR, L, P, R, RP, F>
 where
     C: ChainClient + Debug + Send + Sync + 'static,
     CF: ChainFilterService + Debug + Send + Sync + 'static,
