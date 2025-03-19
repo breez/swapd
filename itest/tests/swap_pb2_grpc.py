@@ -28,7 +28,7 @@ if _version_not_supported:
     )
 
 
-class SwapperStub(object):
+class TaprootSwapperStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -38,32 +38,32 @@ class SwapperStub(object):
             channel: A grpc.Channel.
         """
         self.CreateSwap = channel.unary_unary(
-            "/swap.Swapper/CreateSwap",
+            "/swap.TaprootSwapper/CreateSwap",
             request_serializer=swap__pb2.CreateSwapRequest.SerializeToString,
             response_deserializer=swap__pb2.CreateSwapResponse.FromString,
             _registered_method=True,
         )
         self.PaySwap = channel.unary_unary(
-            "/swap.Swapper/PaySwap",
+            "/swap.TaprootSwapper/PaySwap",
             request_serializer=swap__pb2.PaySwapRequest.SerializeToString,
             response_deserializer=swap__pb2.PaySwapResponse.FromString,
             _registered_method=True,
         )
         self.RefundSwap = channel.unary_unary(
-            "/swap.Swapper/RefundSwap",
+            "/swap.TaprootSwapper/RefundSwap",
             request_serializer=swap__pb2.RefundSwapRequest.SerializeToString,
             response_deserializer=swap__pb2.RefundSwapResponse.FromString,
             _registered_method=True,
         )
         self.SwapParameters = channel.unary_unary(
-            "/swap.Swapper/SwapParameters",
+            "/swap.TaprootSwapper/SwapParameters",
             request_serializer=swap__pb2.SwapParametersRequest.SerializeToString,
             response_deserializer=swap__pb2.SwapParametersResponse.FromString,
             _registered_method=True,
         )
 
 
-class SwapperServicer(object):
+class TaprootSwapperServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def CreateSwap(self, request, context):
@@ -91,7 +91,7 @@ class SwapperServicer(object):
         raise NotImplementedError("Method not implemented!")
 
 
-def add_SwapperServicer_to_server(servicer, server):
+def add_TaprootSwapperServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "CreateSwap": grpc.unary_unary_rpc_method_handler(
             servicer.CreateSwap,
@@ -115,14 +115,14 @@ def add_SwapperServicer_to_server(servicer, server):
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        "swap.Swapper", rpc_method_handlers
+        "swap.TaprootSwapper", rpc_method_handlers
     )
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers("swap.Swapper", rpc_method_handlers)
+    server.add_registered_method_handlers("swap.TaprootSwapper", rpc_method_handlers)
 
 
 # This class is part of an EXPERIMENTAL API.
-class Swapper(object):
+class TaprootSwapper(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -141,7 +141,7 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/CreateSwap",
+            "/swap.TaprootSwapper/CreateSwap",
             swap__pb2.CreateSwapRequest.SerializeToString,
             swap__pb2.CreateSwapResponse.FromString,
             options,
@@ -171,7 +171,7 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/PaySwap",
+            "/swap.TaprootSwapper/PaySwap",
             swap__pb2.PaySwapRequest.SerializeToString,
             swap__pb2.PaySwapResponse.FromString,
             options,
@@ -201,7 +201,7 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/RefundSwap",
+            "/swap.TaprootSwapper/RefundSwap",
             swap__pb2.RefundSwapRequest.SerializeToString,
             swap__pb2.RefundSwapResponse.FromString,
             options,
@@ -231,7 +231,7 @@ class Swapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.Swapper/SwapParameters",
+            "/swap.TaprootSwapper/SwapParameters",
             swap__pb2.SwapParametersRequest.SerializeToString,
             swap__pb2.SwapParametersResponse.FromString,
             options,
