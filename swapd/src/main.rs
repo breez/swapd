@@ -1,5 +1,6 @@
 use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use bitcoin::Network;
 use bitcoind::BitcoindClient;
 use chain::{ChainMonitor, FallbackFeeEstimator};
@@ -24,7 +25,7 @@ use swap::{HistoricalPaymentMonitor, RandomPrivateKeyProvider, RingRandomProvide
 use tokio::signal;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::{Certificate, Identity, Server, Uri};
-use tracing::{field, info, warn};
+use tracing::{field, info, trace, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use wallet::Wallet;
 use whatthefee::WhatTheFeeEstimator;
@@ -73,10 +74,33 @@ impl<'de> Deserialize<'de> for FileOrCert {
 
 impl FileOrCert {
     async fn resolve(&self) -> String {
-        match tokio::fs::read_to_string(&self.0).await {
-            Ok(content) => content,
-            Err(_) => self.0.clone(),
-        }
+        let content = match tokio::fs::read_to_string(&self.0).await {
+            Ok(content) => {
+                trace!("certificate is a file path, read content");
+                content
+            }
+            Err(_) => {
+                trace!("certificate is raw content");
+                self.0.clone()
+            }
+        };
+
+        // Check whether cert is base64 only, if not, return the found content.
+        match BASE64_STANDARD.decode(&content) {
+            Ok(_) => trace!("certificate is base64"),
+            Err(_) => {
+                trace!("certificate is not base64");
+                return content;
+            }
+        };
+
+        let mut s = String::from("-----BEGIN CERTIFICATE-----");
+        s.push('\n');
+        s.push_str(&content);
+        s.push('\n');
+        s.push_str("-----END CERTIFICATE-----");
+        s.push('\n');
+        s
     }
 }
 
