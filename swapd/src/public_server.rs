@@ -36,7 +36,7 @@ use swap_api::{
 };
 
 pub mod swap_api {
-    tonic::include_proto!("swap");
+    tonic::include_proto!("breez");
 }
 
 const FAKE_PREIMAGE: [u8; 32] = [0; 32];

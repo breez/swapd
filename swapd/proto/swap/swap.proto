@@ -1,5 +1,5 @@
 syntax = "proto3";
-package swap;
+package breez;
 
 service TaprootSwapper {
     rpc CreateSwap (CreateSwapRequest) returns (CreateSwapResponse) {}

@@ -38,25 +38,25 @@ class TaprootSwapperStub(object):
             channel: A grpc.Channel.
         """
         self.CreateSwap = channel.unary_unary(
-            "/swap.TaprootSwapper/CreateSwap",
+            "/breez.TaprootSwapper/CreateSwap",
             request_serializer=swap__pb2.CreateSwapRequest.SerializeToString,
             response_deserializer=swap__pb2.CreateSwapResponse.FromString,
             _registered_method=True,
         )
         self.PaySwap = channel.unary_unary(
-            "/swap.TaprootSwapper/PaySwap",
+            "/breez.TaprootSwapper/PaySwap",
             request_serializer=swap__pb2.PaySwapRequest.SerializeToString,
             response_deserializer=swap__pb2.PaySwapResponse.FromString,
             _registered_method=True,
         )
         self.RefundSwap = channel.unary_unary(
-            "/swap.TaprootSwapper/RefundSwap",
+            "/breez.TaprootSwapper/RefundSwap",
             request_serializer=swap__pb2.RefundSwapRequest.SerializeToString,
             response_deserializer=swap__pb2.RefundSwapResponse.FromString,
             _registered_method=True,
         )
         self.SwapParameters = channel.unary_unary(
-            "/swap.TaprootSwapper/SwapParameters",
+            "/breez.TaprootSwapper/SwapParameters",
             request_serializer=swap__pb2.SwapParametersRequest.SerializeToString,
             response_deserializer=swap__pb2.SwapParametersResponse.FromString,
             _registered_method=True,
@@ -115,10 +115,10 @@ def add_TaprootSwapperServicer_to_server(servicer, server):
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        "swap.TaprootSwapper", rpc_method_handlers
+        "breez.TaprootSwapper", rpc_method_handlers
     )
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers("swap.TaprootSwapper", rpc_method_handlers)
+    server.add_registered_method_handlers("breez.TaprootSwapper", rpc_method_handlers)
 
 
 # This class is part of an EXPERIMENTAL API.
@@ -141,7 +141,7 @@ class TaprootSwapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.TaprootSwapper/CreateSwap",
+            "/breez.TaprootSwapper/CreateSwap",
             swap__pb2.CreateSwapRequest.SerializeToString,
             swap__pb2.CreateSwapResponse.FromString,
             options,
@@ -171,7 +171,7 @@ class TaprootSwapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.TaprootSwapper/PaySwap",
+            "/breez.TaprootSwapper/PaySwap",
             swap__pb2.PaySwapRequest.SerializeToString,
             swap__pb2.PaySwapResponse.FromString,
             options,
@@ -201,7 +201,7 @@ class TaprootSwapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.TaprootSwapper/RefundSwap",
+            "/breez.TaprootSwapper/RefundSwap",
             swap__pb2.RefundSwapRequest.SerializeToString,
             swap__pb2.RefundSwapResponse.FromString,
             options,
@@ -231,7 +231,7 @@ class TaprootSwapper(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/swap.TaprootSwapper/SwapParameters",
+            "/breez.TaprootSwapper/SwapParameters",
             swap__pb2.SwapParametersRequest.SerializeToString,
             swap__pb2.SwapParametersResponse.FromString,
             options,
