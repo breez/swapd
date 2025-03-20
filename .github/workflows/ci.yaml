@@ -212,6 +212,78 @@ jobs:
           name: ${{ runner.os }}-${{ runner.arch }}-lnd-${{ matrix.lnd.version}}
           path: /opt/lnd/bin/lnd
 
+  itest-bitcoind:
+    name: Integration tests (bitcoind)
+    needs: compile-cln
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cln-version:
+          - v25.02
+        bitcoind-version:
+          - '22.1'
+          - '23.2'
+          - '24.2'
+          - '25.2'
+          - '26.2'
+          - '27.2'
+          - '28.1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rust
+        run: |
+          rustup set auto-self-update disable
+          rustup toolchain install stable --profile minimal
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "27.4"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install bitcoind
+        run: |
+          wget -q "https://bitcoincore.org/bin/bitcoin-core-${{ matrix.bitcoind-version }}/bitcoin-${{ matrix.bitcoind-version }}-x86_64-linux-gnu.tar.gz"
+          tar -xzf "bitcoin-${{ matrix.bitcoind-version }}-x86_64-linux-gnu.tar.gz"
+          sudo cp -r "bitcoin-${{ matrix.bitcoind-version }}/bin" "/usr/local"
+          rm -rf "bitcoin-${{ matrix.bitcoind-version }}-x86_64-linux-gnu.tar.gz" "bitcoin-${{ matrix.bitcoind-version }}"
+
+      - name: Download cln artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ runner.os }}-${{ runner.arch }}-cln-${{ matrix.cln-version}}
+          path: inst
+
+      - name: Install CLN
+        run: |
+          chmod +x -R inst/
+          sudo cp -a inst/usr/local/. /usr/local/
+          sudo apt install sqlite3
+
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install virtualenv
+        run: python -m pip install --user virtualenv
+
+      - name: Update hodl plugin shebang
+        run: |
+          sed -i '1c#!${{ github.workspace }}/itest-env/bin/python' itest/tests/hodl_plugin.py
+
+      - name: Integration tests
+        env:
+          TEST_DEBUG: 1
+          SLOW_MACHINE: 1
+          PYTEST_PAR: 5
+        run: make itest-cln
+
   itest-cln:
     name: Integration tests (cln)
     needs: compile-cln
@@ -222,9 +294,6 @@ jobs:
           - v25.02
           - v24.11
           - v24.08
-          # - v24.05
-          # - v24.02.2
-          # - v23.11.2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
