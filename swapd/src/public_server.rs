@@ -56,6 +56,7 @@ where
     pub max_swap_amount_sat: u64,
     pub min_confirmations: u64,
     pub min_claim_blocks: u32,
+    pub min_utxo_amount_sat: u64,
     pub min_viable_cltv: u32,
     pub pay_fee_limit_base_msat: u64,
     pub pay_fee_limit_ppm: u64,
@@ -86,6 +87,7 @@ where
     max_swap_amount_sat: u64,
     min_confirmations: u64,
     min_claim_blocks: u32,
+    min_utxo_amount_sat: u64,
     min_viable_cltv: u32,
     pay_fee_limit_base_msat: u64,
     pay_fee_limit_ppm: u64,
@@ -117,6 +119,7 @@ where
             max_swap_amount_sat: params.max_swap_amount_sat,
             min_confirmations: params.min_confirmations,
             min_claim_blocks: params.min_claim_blocks,
+            min_utxo_amount_sat: params.min_utxo_amount_sat,
             min_viable_cltv: params.min_viable_cltv,
             pay_fee_limit_base_msat: params.pay_fee_limit_base_msat,
             pay_fee_limit_ppm: params.pay_fee_limit_ppm,
@@ -139,6 +142,7 @@ where
             .await?;
         // Assume a transaction weight of 1000.
         let min_utxo_amount_sat = (fee_estimate.sat_per_kw as u64) * 3 / 2;
+        let min_utxo_amount_sat = min_utxo_amount_sat.max(self.min_utxo_amount_sat);
 
         Ok(SwapParameters {
             max_swap_amount_sat: self.max_swap_amount_sat,

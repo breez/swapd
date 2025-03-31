@@ -123,6 +123,11 @@ struct Args {
     #[arg(long, default_value = "4000000")]
     pub max_swap_amount_sat: u64,
 
+    /// Absolute minimum value for candidate swap outputs. The minimum value
+    /// depends on current chainfees, but will never be lower than this.
+    #[arg(long, default_value = "1000")]
+    pub min_utxo_amount_sat: u64,
+
     /// Locktime for swaps. This is the time between creation of the swap
     /// address until the client can get a refund. The swap address will contain
     /// a script with an absolute locktime which is the current height + lock
@@ -519,6 +524,7 @@ where
             max_swap_amount_sat: args.max_swap_amount_sat,
             min_confirmations: args.min_confirmations,
             min_claim_blocks: args.min_claim_blocks,
+            min_utxo_amount_sat: args.min_utxo_amount_sat,
             min_viable_cltv: args.min_viable_cltv,
             pay_fee_limit_base_msat: args.pay_fee_limit_base_msat,
             pay_fee_limit_ppm: args.pay_fee_limit_ppm,
