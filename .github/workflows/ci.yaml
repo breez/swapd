@@ -87,11 +87,11 @@ jobs:
     strategy:
       matrix:
         cln:
-          - version: v25.02
+          - version: v25.02.1
             rust-version: stable
             org: ElementsProject
             repo: lightning
-          - version: v24.11
+          - version: v24.11.2
             rust-version: stable
             org: ElementsProject
             repo: lightning
@@ -219,7 +219,7 @@ jobs:
     strategy:
       matrix:
         cln-version:
-          - v25.02
+          - v25.02.1
         bitcoind-version:
           - '22.1'
           - '23.2'
@@ -291,8 +291,8 @@ jobs:
     strategy:
       matrix:
         cln-version:
-          - v25.02
-          - v24.11
+          - v25.02.1
+          - v24.11.2
           - v24.08
     steps:
       - name: Checkout
@@ -360,7 +360,7 @@ jobs:
       matrix:
         test:
           - lnd-version: jssdwt-v0.18.3-with-ca
-            cln-version: v24.11
+            cln-version: v25.02.1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
