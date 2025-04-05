@@ -240,7 +240,7 @@ where
             ))
             .ok_or(SwapError::InvalidWeight)?;
         let fee_msat = weight.to_wu() * fee.sat_per_kw as u64;
-        let fee_sat = (fee_msat + 999) / 1000;
+        let fee_sat = fee_msat.div_ceil(1000);
         let value_after_fees_sat = total_value.saturating_sub(fee_sat);
         if value_after_fees_sat < self.dust_limit_sat {
             trace!(
