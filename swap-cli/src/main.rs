@@ -25,7 +25,7 @@ fn parse_hex(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
 #[derive(Parser)]
 struct Args {
     /// Address to the internal grpc server.
-    #[arg(long)]
+    #[arg(long, default_value = "http://127.0.0.1:58050")]
     pub grpc_uri: Uri,
 
     #[command(subcommand)]
