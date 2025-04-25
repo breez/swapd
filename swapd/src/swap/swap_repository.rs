@@ -46,7 +46,9 @@ pub enum GetSwapsError {
 }
 
 #[derive(Debug, Error)]
-pub enum GetUnhandledPaymentAttemptsError {
+pub enum GetPaymentAttemptsError {
+    #[error("invalid preimage")]
+    InvalidPreimage,
     #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
@@ -63,6 +65,12 @@ pub struct PaymentAttempt {
 }
 
 #[derive(Debug)]
+pub struct PaymentAttemptWithResult {
+    pub attempt: PaymentAttempt,
+    pub result: Option<PaymentResult>,
+}
+
+#[derive(Debug)]
 pub struct SwapStatePaidOutpoints {
     pub swap_state: SwapState,
     pub paid_outpoints: Vec<PaidOutpoint>,
@@ -74,6 +82,12 @@ pub struct PaidOutpoint {
     pub payment_request: String,
 }
 
+#[derive(Debug)]
+pub struct SwapLock {
+    pub refund_id: Option<String>,
+    pub payment_attempt_label: Option<String>,
+}
+
 #[async_trait::async_trait]
 pub trait SwapRepository {
     async fn add_swap(&self, swap: &Swap) -> Result<(), SwapPersistenceError>;
@@ -83,6 +97,11 @@ pub trait SwapRepository {
         &self,
         payment_request: &str,
     ) -> Result<SwapState, GetSwapsError>;
+    async fn get_swap_locks(&self, hash: &sha256::Hash) -> Result<Vec<SwapLock>, LockSwapError>;
+    async fn get_swap_payment_attempts(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<Vec<PaymentAttemptWithResult>, GetPaymentAttemptsError>;
     async fn get_swaps(
         &self,
         addresses: &[Address],
@@ -93,7 +112,7 @@ pub trait SwapRepository {
     ) -> Result<HashMap<Address, SwapStatePaidOutpoints>, GetSwapsError>;
     async fn get_unhandled_payment_attempts(
         &self,
-    ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError>;
+    ) -> Result<Vec<PaymentAttempt>, GetPaymentAttemptsError>;
     async fn lock_add_payment_attempt(&self, attempt: &PaymentAttempt)
         -> Result<(), LockSwapError>;
     async fn lock_swap_refund(

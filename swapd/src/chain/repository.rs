@@ -1,7 +1,7 @@
 use bitcoin::{Address, BlockHash, OutPoint, Txid};
 use thiserror::Error;
 
-use super::types::{BlockHeader, Txo};
+use super::types::{BlockHeader, Txo, TxoWithSpend};
 
 #[derive(Debug, Error)]
 pub enum ChainRepositoryError {
@@ -43,10 +43,10 @@ pub trait ChainRepository {
         &self,
         address: &Address,
     ) -> Result<Vec<Txo>, ChainRepositoryError>;
-    async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError>;
-    async fn get_utxos_for_address(
+    async fn get_txos_for_address_with_spends(
         &self,
         address: &Address,
-    ) -> Result<Vec<Txo>, ChainRepositoryError>;
+    ) -> Result<Vec<TxoWithSpend>, ChainRepositoryError>;
+    async fn get_utxos(&self) -> Result<Vec<AddressUtxo>, ChainRepositoryError>;
     async fn undo_block(&self, hash: BlockHash) -> Result<(), ChainRepositoryError>;
 }

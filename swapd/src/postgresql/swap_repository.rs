@@ -17,9 +17,9 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetSwapsError, GetUnhandledPaymentAttemptsError,
-        LockSwapError, PaidOutpoint, PaymentAttempt, Swap, SwapPersistenceError, SwapPrivateData,
-        SwapPublicData, SwapState, SwapStatePaidOutpoints,
+        AddPaymentResultError, GetPaidUtxosError, GetPaymentAttemptsError, GetSwapsError,
+        LockSwapError, PaidOutpoint, PaymentAttempt, PaymentAttemptWithResult, Swap, SwapLock,
+        SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState, SwapStatePaidOutpoints,
     },
 };
 
@@ -181,6 +181,114 @@ impl crate::swap::SwapRepository for SwapRepository {
     }
 
     #[instrument(level = "trace", skip(self))]
+    async fn get_swap_locks(&self, hash: &sha256::Hash) -> Result<Vec<SwapLock>, LockSwapError> {
+        let mut rows = sqlx::query(
+            r#"SELECT refund_id
+               ,      payment_attempt_label
+               FROM swap_locks
+               WHERE swap_payment_hash = $1"#,
+        )
+        .bind(hash.as_byte_array().to_vec())
+        .fetch(&*self.pool);
+
+        let mut result = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            result.push(SwapLock {
+                refund_id: row.try_get("refund_id")?,
+                payment_attempt_label: row.try_get("payment_attempt_label")?,
+            });
+        }
+
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn get_swap_payment_attempts(
+        &self,
+        hash: &sha256::Hash,
+    ) -> Result<Vec<PaymentAttemptWithResult>, GetPaymentAttemptsError> {
+        let mut rows = sqlx::query(
+            r#"SELECT pa.swap_payment_hash
+               ,      pa.label
+               ,      pa.creation_time
+               ,      pa.amount_msat
+               ,      pa.payment_request
+               ,      pa.destination
+               ,      pa.success
+               ,      pa.error
+               ,      patx.tx_id
+               ,      patx.output_index
+               FROM payment_attempts pa
+               LEFT JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
+               WHERE pa.swap_payment_hash = $1
+               ORDER BY pa.creation_time"#,
+        )
+        .bind(hash.as_byte_array().to_vec())
+        .fetch(&*self.pool);
+
+        let mut attempts = HashMap::new();
+        while let Some(row) = rows.try_next().await? {
+            let payment_hash: Vec<u8> = row.try_get("swap_payment_hash")?;
+            let label: String = row.try_get("label")?;
+            let creation_time: i64 = row.try_get("creation_time")?;
+            let amount_msat: i64 = row.try_get("amount_msat")?;
+            let payment_request: String = row.try_get("payment_request")?;
+            let destination: Vec<u8> = row.try_get("destination")?;
+            let success: Option<bool> = row.try_get("success")?;
+            let error: Option<String> = row.try_get("error")?;
+            let tx_id: Option<String> = row.try_get("tx_id")?;
+            let output_index: Option<i64> = row.try_get("output_index")?;
+
+            let payment_hash = sha256::Hash::from_slice(&payment_hash)?;
+            let creation_time = SystemTime::UNIX_EPOCH
+                .checked_add(Duration::from_secs(creation_time as u64))
+                .ok_or(GetPaymentAttemptsError::General("invalid timestamp".into()))?;
+            let destination = PublicKey::from_slice(&destination)?;
+
+            let result = match success {
+                Some(true) => {
+                    let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
+                    let preimage = match preimage {
+                        Some(preimage) => preimage
+                            .try_into()
+                            .map_err(|_| GetPaymentAttemptsError::InvalidPreimage)?,
+                        None => return Err(GetPaymentAttemptsError::InvalidPreimage),
+                    };
+                    Some(PaymentResult::Success { preimage })
+                }
+                Some(false) => Some(PaymentResult::Failure {
+                    error: error.unwrap_or_else(|| "unknown error".to_string()),
+                }),
+                None => None,
+            };
+            let attempt =
+                attempts
+                    .entry(label.clone())
+                    .or_insert_with(|| PaymentAttemptWithResult {
+                        attempt: PaymentAttempt {
+                            payment_hash,
+                            label: label.clone(),
+                            creation_time,
+                            amount_msat: amount_msat as u64,
+                            payment_request: payment_request.clone(),
+                            destination,
+                            outputs: Vec::new(),
+                        },
+                        result,
+                    });
+
+            if let (Some(tx_id), Some(output_index)) = (tx_id, output_index) {
+                attempt
+                    .attempt
+                    .outputs
+                    .push(OutPoint::new(tx_id.parse()?, output_index as u32));
+            }
+        }
+
+        Ok(attempts.into_values().collect())
+    }
+
+    #[instrument(level = "trace", skip(self))]
     async fn get_swaps(
         &self,
         addresses: &[Address],
@@ -270,7 +378,7 @@ impl crate::swap::SwapRepository for SwapRepository {
 
     async fn get_unhandled_payment_attempts(
         &self,
-    ) -> Result<Vec<PaymentAttempt>, GetUnhandledPaymentAttemptsError> {
+    ) -> Result<Vec<PaymentAttempt>, GetPaymentAttemptsError> {
         let mut rows = sqlx::query(
             r#"SELECT pa.swap_payment_hash
                ,      pa.label
@@ -301,9 +409,7 @@ impl crate::swap::SwapRepository for SwapRepository {
             let payment_hash = sha256::Hash::from_slice(&payment_hash)?;
             let creation_time = SystemTime::UNIX_EPOCH
                 .checked_add(Duration::from_secs(creation_time as u64))
-                .ok_or(GetUnhandledPaymentAttemptsError::General(
-                    "invalid timestamp".into(),
-                ))?;
+                .ok_or(GetPaymentAttemptsError::General("invalid timestamp".into()))?;
             let destination = PublicKey::from_slice(&destination)?;
 
             let attempt = attempts
@@ -621,26 +727,26 @@ impl From<bitcoin::hashes::hex::HexToArrayError> for GetPaidUtxosError {
     }
 }
 
-impl From<sqlx::Error> for GetUnhandledPaymentAttemptsError {
+impl From<sqlx::Error> for GetPaymentAttemptsError {
     fn from(value: sqlx::Error) -> Self {
-        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+        GetPaymentAttemptsError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::secp256k1::Error> for GetUnhandledPaymentAttemptsError {
+impl From<bitcoin::secp256k1::Error> for GetPaymentAttemptsError {
     fn from(value: bitcoin::secp256k1::Error) -> Self {
-        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+        GetPaymentAttemptsError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::hashes::hex::HexToArrayError> for GetUnhandledPaymentAttemptsError {
+impl From<bitcoin::hashes::hex::HexToArrayError> for GetPaymentAttemptsError {
     fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
-        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+        GetPaymentAttemptsError::General(Box::new(value))
     }
 }
 
-impl From<bitcoin::hashes::FromSliceError> for GetUnhandledPaymentAttemptsError {
+impl From<bitcoin::hashes::FromSliceError> for GetPaymentAttemptsError {
     fn from(value: bitcoin::hashes::FromSliceError) -> Self {
-        GetUnhandledPaymentAttemptsError::General(Box::new(value))
+        GetPaymentAttemptsError::General(Box::new(value))
     }
 }

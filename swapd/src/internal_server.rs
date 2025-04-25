@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::UNIX_EPOCH};
 
 use bitcoin::{
     address::{NetworkChecked, NetworkUnchecked},
@@ -13,6 +13,7 @@ use crate::{
     chain::{ChainClient, ChainRepository, FeeEstimate, FeeEstimator},
     chain_filter::ChainFilterRepository,
     claim::{ClaimError, ClaimRepository, ClaimService, ClaimServiceError},
+    lightning::PaymentResult,
     swap::{GetSwapsError, PrivateKeyProvider, SwapRepository},
     wallet::{Wallet, WalletError},
 };
@@ -20,8 +21,8 @@ use crate::{
 use internal_swap_api::{
     swap_manager_server::SwapManager, AddAddressFiltersRequest, AddAddressFiltersResponse,
     ClaimRequest, ClaimResponse, ClaimableUtxo, GetInfoRequest, GetInfoResponse, GetSwapRequest,
-    GetSwapResponse, ListClaimableRequest, ListClaimableResponse, StopRequest, StopResponse,
-    SwapOutput,
+    GetSwapResponse, ListClaimableRequest, ListClaimableResponse, PaymentAttempt, SpendType,
+    StopRequest, StopResponse, SwapLock, SwapOutput, SwapOutputSpend,
 };
 
 pub mod internal_swap_api {
@@ -230,21 +231,87 @@ where
             }
         };
 
-        let utxos = self
+        let txos = self
             .chain_repository
-            .get_utxos_for_address(&swap.swap.public.address)
+            .get_txos_for_address_with_spends(&swap.swap.public.address)
+            .await
+            .map_err(|e| Status::internal(format!("{:?}", e)))?;
+
+        let locks = self
+            .swap_repository
+            .get_swap_locks(&swap.swap.public.hash)
+            .await
+            .map_err(|e| Status::internal(format!("{:?}", e)))?;
+
+        let payment_attempts = self
+            .swap_repository
+            .get_swap_payment_attempts(&swap.swap.public.hash)
             .await
             .map_err(|e| Status::internal(format!("{:?}", e)))?;
         let reply = GetSwapResponse {
             address: swap.swap.public.address.to_string(),
-            outputs: utxos
-                .iter()
-                .map(|utxo| SwapOutput {
-                    confirmation_height: Some(utxo.block_height),
-                    outpoint: utxo.outpoint.to_string(),
-                    block_hash: Some(utxo.block_hash.to_string()),
+            creation_time: swap
+                .swap
+                .creation_time
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| Status::internal("invalid system time"))?
+                .as_secs(),
+            outputs: txos
+                .into_iter()
+                .map(|txo| SwapOutput {
+                    confirmation_height: txo.txo.block_height,
+                    outpoint: txo.txo.outpoint.to_string(),
+                    block_hash: txo.txo.block_hash.to_string(),
+                    spend: txo.spend.map(|spend| SwapOutputSpend {
+                        block_hash: spend.block_hash.to_string(),
+                        confirmation_height: spend.block_height,
+                        input_index: spend.spending_input_index,
+                        spend_type: SpendType::Unknown.into(),
+                        txid: spend.spending_tx.to_string(),
+                    }),
                 })
                 .collect(),
+            payment_hash: swap.swap.public.hash.to_string(),
+            lock_time: swap.swap.public.lock_time.into(),
+            active_locks: locks
+                .into_iter()
+                .map(|l| SwapLock {
+                    refund_id: l.refund_id,
+                    payment_attempt_label: l.payment_attempt_label,
+                })
+                .collect(),
+            payment_attempts: payment_attempts
+                .into_iter()
+                .map(|a| {
+                    Ok(PaymentAttempt {
+                        creation_time: a
+                            .attempt
+                            .creation_time
+                            .duration_since(UNIX_EPOCH)
+                            .map_err(|_| Status::internal("invalid system time"))?
+                            .as_secs(),
+                        label: a.attempt.label,
+                        outpoints: a.attempt.outputs.iter().map(|o| o.to_string()).collect(),
+                        amount_msat: a.attempt.amount_msat,
+                        payment_request: a.attempt.payment_request,
+                        error: match &a.result {
+                            Some(r) => match r {
+                                PaymentResult::Success { preimage: _ } => None,
+                                PaymentResult::Failure { error } => Some(error.clone()),
+                            },
+                            None => None,
+                        },
+                        success: match &a.result {
+                            Some(r) => match r {
+                                PaymentResult::Success { preimage: _ } => true,
+                                PaymentResult::Failure { error: _ } => false,
+                            },
+                            None => false,
+                        },
+                        pending: a.result.is_none(),
+                    })
+                })
+                .collect::<Result<Vec<PaymentAttempt>, Status>>()?,
         };
         Ok(Response::new(reply))
     }

@@ -1,4 +1,5 @@
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import (
@@ -10,6 +11,18 @@ from typing import (
 )
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class SpendType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    UNKNOWN: _ClassVar[SpendType]
+    CLAIM: _ClassVar[SpendType]
+    COOPERATIVE_REFUND: _ClassVar[SpendType]
+    UNILATERAL_REFUND: _ClassVar[SpendType]
+
+UNKNOWN: SpendType
+CLAIM: SpendType
+COOPERATIVE_REFUND: SpendType
+UNILATERAL_REFUND: SpendType
 
 class AddAddressFiltersRequest(_message.Message):
     __slots__ = ("addresses",)
@@ -51,30 +64,134 @@ class GetSwapRequest(_message.Message):
     ) -> None: ...
 
 class GetSwapResponse(_message.Message):
-    __slots__ = ("address", "outputs")
+    __slots__ = (
+        "address",
+        "creation_time",
+        "payment_hash",
+        "outputs",
+        "lock_time",
+        "active_locks",
+        "payment_attempts",
+    )
     ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    CREATION_TIME_FIELD_NUMBER: _ClassVar[int]
+    PAYMENT_HASH_FIELD_NUMBER: _ClassVar[int]
     OUTPUTS_FIELD_NUMBER: _ClassVar[int]
+    LOCK_TIME_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_LOCKS_FIELD_NUMBER: _ClassVar[int]
+    PAYMENT_ATTEMPTS_FIELD_NUMBER: _ClassVar[int]
     address: str
+    creation_time: int
+    payment_hash: str
     outputs: _containers.RepeatedCompositeFieldContainer[SwapOutput]
+    lock_time: int
+    active_locks: _containers.RepeatedCompositeFieldContainer[SwapLock]
+    payment_attempts: _containers.RepeatedCompositeFieldContainer[PaymentAttempt]
     def __init__(
         self,
         address: _Optional[str] = ...,
+        creation_time: _Optional[int] = ...,
+        payment_hash: _Optional[str] = ...,
         outputs: _Optional[_Iterable[_Union[SwapOutput, _Mapping]]] = ...,
+        lock_time: _Optional[int] = ...,
+        active_locks: _Optional[_Iterable[_Union[SwapLock, _Mapping]]] = ...,
+        payment_attempts: _Optional[_Iterable[_Union[PaymentAttempt, _Mapping]]] = ...,
     ) -> None: ...
 
 class SwapOutput(_message.Message):
-    __slots__ = ("outpoint", "confirmation_height", "block_hash")
+    __slots__ = ("outpoint", "confirmation_height", "block_hash", "spend")
     OUTPOINT_FIELD_NUMBER: _ClassVar[int]
     CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
     BLOCK_HASH_FIELD_NUMBER: _ClassVar[int]
+    SPEND_FIELD_NUMBER: _ClassVar[int]
     outpoint: str
     confirmation_height: int
     block_hash: str
+    spend: SwapOutputSpend
     def __init__(
         self,
         outpoint: _Optional[str] = ...,
         confirmation_height: _Optional[int] = ...,
         block_hash: _Optional[str] = ...,
+        spend: _Optional[_Union[SwapOutputSpend, _Mapping]] = ...,
+    ) -> None: ...
+
+class SwapOutputSpend(_message.Message):
+    __slots__ = (
+        "input_index",
+        "txid",
+        "spend_type",
+        "confirmation_height",
+        "block_hash",
+    )
+    INPUT_INDEX_FIELD_NUMBER: _ClassVar[int]
+    TXID_FIELD_NUMBER: _ClassVar[int]
+    SPEND_TYPE_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMATION_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    BLOCK_HASH_FIELD_NUMBER: _ClassVar[int]
+    input_index: int
+    txid: str
+    spend_type: SpendType
+    confirmation_height: int
+    block_hash: str
+    def __init__(
+        self,
+        input_index: _Optional[int] = ...,
+        txid: _Optional[str] = ...,
+        spend_type: _Optional[_Union[SpendType, str]] = ...,
+        confirmation_height: _Optional[int] = ...,
+        block_hash: _Optional[str] = ...,
+    ) -> None: ...
+
+class SwapLock(_message.Message):
+    __slots__ = ("payment_attempt_label", "refund_id")
+    PAYMENT_ATTEMPT_LABEL_FIELD_NUMBER: _ClassVar[int]
+    REFUND_ID_FIELD_NUMBER: _ClassVar[int]
+    payment_attempt_label: str
+    refund_id: str
+    def __init__(
+        self,
+        payment_attempt_label: _Optional[str] = ...,
+        refund_id: _Optional[str] = ...,
+    ) -> None: ...
+
+class PaymentAttempt(_message.Message):
+    __slots__ = (
+        "payment_request",
+        "amount_msat",
+        "error",
+        "creation_time",
+        "outpoints",
+        "label",
+        "success",
+        "pending",
+    )
+    PAYMENT_REQUEST_FIELD_NUMBER: _ClassVar[int]
+    AMOUNT_MSAT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    CREATION_TIME_FIELD_NUMBER: _ClassVar[int]
+    OUTPOINTS_FIELD_NUMBER: _ClassVar[int]
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    PENDING_FIELD_NUMBER: _ClassVar[int]
+    payment_request: str
+    amount_msat: int
+    error: str
+    creation_time: int
+    outpoints: _containers.RepeatedScalarFieldContainer[str]
+    label: str
+    success: bool
+    pending: bool
+    def __init__(
+        self,
+        payment_request: _Optional[str] = ...,
+        amount_msat: _Optional[int] = ...,
+        error: _Optional[str] = ...,
+        creation_time: _Optional[int] = ...,
+        outpoints: _Optional[_Iterable[str]] = ...,
+        label: _Optional[str] = ...,
+        success: bool = ...,
+        pending: bool = ...,
     ) -> None: ...
 
 class ListClaimableRequest(_message.Message):

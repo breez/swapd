@@ -29,12 +29,46 @@ message GetSwapRequest {
 }
 message GetSwapResponse {
     string address = 1;
-    repeated SwapOutput outputs = 2;
+    uint64 creation_time = 2;
+    string payment_hash = 3;
+    repeated SwapOutput outputs = 4;
+    uint32 lock_time = 5;
+    repeated SwapLock active_locks = 6;
+    repeated PaymentAttempt payment_attempts = 7;
 }
 message SwapOutput {
     string outpoint = 1;
-    optional uint64 confirmation_height = 2;
-    optional string block_hash = 3;
+    uint64 confirmation_height = 2;
+    string block_hash = 3;
+    optional SwapOutputSpend spend = 4;
+}
+message SwapOutputSpend {
+    uint32 input_index = 1;
+    string txid = 2;
+    SpendType spend_type = 3;
+    uint64 confirmation_height = 4;
+    string block_hash = 5;
+}
+message SwapLock {
+    optional string payment_attempt_label = 1;
+    optional string refund_id = 2;
+}
+message PaymentAttempt {
+    string payment_request = 1;
+    uint64 amount_msat = 2;
+    optional string error = 3;
+    uint64 creation_time = 4;
+    repeated string outpoints = 5;
+    string label = 6;
+    bool success = 7;
+    bool pending = 8;
+}
+
+enum SpendType {
+    UNKNOWN = 0;
+    CLAIM = 1;
+    COOPERATIVE_REFUND = 2;
+    UNILATERAL_REFUND = 3;
 }
 
 message ListClaimableRequest {}

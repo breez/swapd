@@ -114,6 +114,14 @@ def test_cooperative_refund_success(node_factory, swapd_factory):
     user.bitcoin.generate_block(1)
     wait_for(lambda: len(user.list_utxos()) == expected_utxos)
 
+    swap = swapper.internal_rpc.get_swap(address)
+    assert swap.address == address
+    assert swap.creation_time > 0
+    assert swap.payment_hash == h
+    assert len(swap.outputs) == 1
+    assert len(swap.active_locks) == 1
+    assert len(swap.payment_attempts) == 0
+
 
 def test_cooperative_refund_rbf_success(node_factory, swapd_factory):
     setup("regtest")

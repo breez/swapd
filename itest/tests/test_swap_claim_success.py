@@ -1,4 +1,5 @@
 from helpers import *
+import grpc
 
 
 def test_swap_claim_success(node_factory, swapd_factory):
@@ -9,6 +10,15 @@ def test_swap_claim_success(node_factory, swapd_factory):
     user.bitcoin.generate_block(1)
 
     wait_for(lambda: len(swapper.internal_rpc.get_swap(address).outputs) > 0)
+
+    swap = swapper.internal_rpc.get_swap(address)
+    assert swap.address == address
+    assert swap.creation_time > 0
+    assert swap.payment_hash == h
+    assert len(swap.outputs) == 1
+    assert swap.outputs[0].HasField("spend") == False
+    assert len(swap.active_locks) == 0
+    assert len(swap.payment_attempts) == 0
 
     swapper.rpc.pay_swap(payment_request)
     wait_for(lambda: user.list_invoices(payment_hash=h)[0]["paid"])

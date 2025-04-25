@@ -5,7 +5,9 @@ use futures::TryStreamExt;
 use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use tracing::instrument;
 
-use crate::chain::{self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentTxo, Txo};
+use crate::chain::{
+    self, AddressUtxo, BlockHeader, ChainRepositoryError, SpentTxo, Txo, TxoSpend, TxoWithSpend,
+};
 
 #[derive(Debug)]
 pub struct ChainRepository {
@@ -314,7 +316,7 @@ impl chain::ChainRepository for ChainRepository {
             FROM tx_outputs o
             INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
             INNER JOIN blocks b ON tb.block_hash = b.block_hash
-            WHERE address = $1
+            WHERE o.address = $1
             ORDER BY b.height, o.tx_id, o.output_index"#,
         )
         .bind(address.to_string())
@@ -324,6 +326,62 @@ impl chain::ChainRepository for ChainRepository {
         while let Some(row) = rows.try_next().await? {
             let txo = self.map_txo(address, &row).await?;
             result.push(txo);
+        }
+        Ok(result)
+    }
+
+    #[instrument(level = "trace", skip(self))]
+    async fn get_txos_for_address_with_spends(
+        &self,
+        address: &Address,
+    ) -> Result<Vec<TxoWithSpend>, ChainRepositoryError> {
+        let mut rows = sqlx::query(
+            r#"SELECT o.tx_id
+            ,         o.output_index
+            ,         o.amount
+            ,         b.block_hash
+            ,         b.height
+            ,         sp.spending_tx_id
+            ,         sp.spending_input_index
+            ,         sp.spending_block_hash
+            ,         sp.spending_block_height
+            FROM tx_outputs o
+            INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
+            INNER JOIN blocks b ON tb.block_hash = b.block_hash
+            LEFT JOIN (
+                SELECT i.spending_tx_id
+                ,      i.spending_input_index
+                ,      ib.block_hash AS spending_block_hash
+                ,      ib.height AS spending_block_height
+                FROM tx_inputs i
+                INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
+                INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
+            ) sp ON sp.spending_tx_id = o.tx_id AND sp.spending_input_index = o.output_index
+            WHERE o.address = $1
+            ORDER BY b.height, o.tx_id, o.output_index"#,
+        )
+        .bind(address.to_string())
+        .fetch(&*self.pool);
+
+        let mut result = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let txo = self.map_txo(address, &row).await?;
+            let spending_tx_id: Option<String> = row.try_get("spending_tx_id")?;
+            let spend = match spending_tx_id {
+                Some(spending_tx_id) => {
+                    let spending_input_index: i64 = row.try_get("spending_input_index")?;
+                    let block_hash: String = row.try_get("spending_block_hash")?;
+                    let block_height: i64 = row.try_get("spending_block_height")?;
+                    Some(TxoSpend {
+                        spending_tx: spending_tx_id.parse()?,
+                        spending_input_index: spending_input_index as u32,
+                        block_hash: block_hash.parse()?,
+                        block_height: block_height as u64,
+                    })
+                }
+                None => None,
+            };
+            result.push(TxoWithSpend { txo, spend });
         }
         Ok(result)
     }
@@ -358,40 +416,6 @@ impl chain::ChainRepository for ChainRepository {
                 .require_network(self.network)?;
             let utxo = self.map_txo(&address, &row).await?;
             result.push(AddressUtxo { address, utxo });
-        }
-        Ok(result)
-    }
-
-    #[instrument(level = "trace", skip(self))]
-    async fn get_utxos_for_address(
-        &self,
-        address: &Address,
-    ) -> Result<Vec<Txo>, ChainRepositoryError> {
-        let mut rows = sqlx::query(
-            r#"SELECT o.tx_id
-            ,         o.output_index
-            ,         o.amount
-            ,         b.block_hash
-            ,         b.height
-            FROM tx_outputs o
-            INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
-            INNER JOIN blocks b ON tb.block_hash = b.block_hash
-            WHERE address = $1 AND NOT EXISTS (
-                SELECT 1 
-                FROM tx_inputs i
-                INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
-                INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
-                WHERE o.tx_id = i.tx_id 
-                    AND o.output_index = i.output_index)
-            ORDER BY b.height, o.tx_id, o.output_index"#,
-        )
-        .bind(address.to_string())
-        .fetch(&*self.pool);
-
-        let mut result: Vec<Txo> = Vec::new();
-        while let Some(row) = rows.try_next().await? {
-            let utxo = self.map_txo(address, &row).await?;
-            result.push(utxo);
         }
         Ok(result)
     }
