@@ -349,14 +349,16 @@ impl chain::ChainRepository for ChainRepository {
             INNER JOIN tx_blocks tb ON tb.tx_id = o.tx_id
             INNER JOIN blocks b ON tb.block_hash = b.block_hash
             LEFT JOIN (
-                SELECT i.spending_tx_id
+                SELECT i.tx_id
+                ,      i.output_index
+                ,      i.spending_tx_id
                 ,      i.spending_input_index
                 ,      ib.block_hash AS spending_block_hash
                 ,      ib.height AS spending_block_height
                 FROM tx_inputs i
                 INNER JOIN tx_blocks itb ON itb.tx_id = i.spending_tx_id
                 INNER JOIN blocks ib ON itb.block_hash = ib.block_hash
-            ) sp ON sp.spending_tx_id = o.tx_id AND sp.spending_input_index = o.output_index
+            ) sp ON sp.tx_id = o.tx_id AND sp.output_index = o.output_index
             WHERE o.address = $1
             ORDER BY b.height, o.tx_id, o.output_index"#,
         )
