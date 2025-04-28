@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::chain::{BlockHeader, BroadcastError, ChainClient, ChainError};
 
@@ -229,10 +229,18 @@ impl ChainClient for BitcoindClient {
 
     async fn get_block_header(&self, hash: &BlockHash) -> Result<BlockHeader, ChainError> {
         let resp = self.getblockheader(hash.to_string()).await?;
+        let prev =
+            BlockHash::from_raw_hash(sha256d::Hash::from_str(match resp.previousblockhash {
+                Some(ref prev) => prev,
+                None => {
+                    warn!("no previous block hash, assuming {} is genesis block", hash);
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                }
+            })?);
         Ok(BlockHeader {
             hash: resp.hash.parse()?,
             height: resp.height,
-            prev: resp.previousblockhash.parse()?,
+            prev,
         })
     }
 

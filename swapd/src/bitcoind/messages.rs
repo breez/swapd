@@ -24,7 +24,7 @@ impl<'de> Deserialize<'de> for GetBestBlockHashResponse {
 pub struct GetBlockHeaderResponse {
     pub hash: String,
     pub height: u64,
-    pub previousblockhash: String,
+    pub previousblockhash: Option<String>,
 }
 
 pub struct GetBlockResponse {
