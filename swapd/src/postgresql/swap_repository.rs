@@ -218,8 +218,10 @@ impl crate::swap::SwapRepository for SwapRepository {
                ,      pa.error
                ,      patx.tx_id
                ,      patx.output_index
+               ,      s.preimage
                FROM payment_attempts pa
                LEFT JOIN payment_attempt_tx_outputs patx ON pa.id = patx.payment_attempt_id
+               INNER JOIN swaps s ON pa.swap_payment_hash = s.payment_hash
                WHERE pa.swap_payment_hash = $1
                ORDER BY pa.creation_time"#,
         )
