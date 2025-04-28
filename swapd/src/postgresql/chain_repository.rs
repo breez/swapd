@@ -176,7 +176,7 @@ impl chain::ChainRepository for ChainRepository {
         let mut txns: Vec<_> = tx_outputs
             .iter()
             .map(|o| o.utxo.outpoint.txid.to_string())
-            .chain(tx_inputs.iter().map(|i| i.outpoint.txid.to_string()))
+            .chain(tx_inputs.iter().map(|i| i.spending_tx.to_string()))
             .collect();
         txns.dedup();
         let block_hashes: Vec<_> = txns.iter().map(|_| block.hash.to_string()).collect();
