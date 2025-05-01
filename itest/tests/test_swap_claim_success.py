@@ -26,3 +26,12 @@ def test_swap_claim_success(node_factory, swapd_factory):
     wait_for(lambda: swapper.lightning_node.bitcoin.rpc.getmempoolinfo()["size"] == 1)
     swapper.lightning_node.bitcoin.generate_block(1)
     wait_for(lambda: len(swapper.lightning_node.list_utxos()) == expected_outputs)
+
+    swap = swapper.internal_rpc.get_swap(address)
+    assert swap.address == address
+    assert swap.creation_time > 0
+    assert swap.payment_hash == h
+    assert len(swap.outputs) == 1
+    assert len(swap.active_locks) == 0
+    assert len(swap.payment_attempts) == 1
+    assert swap.payment_attempts[0].success == True
