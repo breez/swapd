@@ -38,6 +38,7 @@ pub struct Client {
 impl Client {
     pub fn new(connection: ClientConnection, network: Network) -> Self {
         let tls_config = ClientTlsConfig::new()
+            .domain_name("cln")
             .ca_certificate(connection.ca_cert)
             .identity(connection.identity);
         Self {
