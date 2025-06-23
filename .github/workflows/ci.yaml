@@ -70,7 +70,6 @@ jobs:
           rustup toolchain install stable --profile minimal
 
       - name: Install Protoc
-        if: steps.cache.outputs.cache-hit != 'true'
         uses: arduino/setup-protoc@v3
         with:
           version: "27.4"
@@ -87,28 +86,39 @@ jobs:
     strategy:
       matrix:
         cln:
+          - version: v25.05
+            rust-version: stable
+            python-version: 3.9
+            org: ElementsProject
+            repo: lightning
           - version: v25.02.1
             rust-version: stable
+            python-version: 3.8
             org: ElementsProject
             repo: lightning
           - version: v24.11.2
             rust-version: stable
+            python-version: 3.8
             org: ElementsProject
             repo: lightning
           - version: v24.08
             rust-version: stable
+            python-version: 3.8
             org: ElementsProject
             repo: lightning
           - version: v24.05
             rust-version: 1.79.0
+            python-version: 3.8
             org: ElementsProject
             repo: lightning
           - version: v24.02.2
             rust-version: 1.79.0
+            python-version: 3.8
             org: ElementsProject
             repo: lightning
           - version: v23.11.2
             rust-version: 1.79.0
+            python-version: 3.8
             org: ElementsProject
             repo: lightning
     steps:
@@ -132,11 +142,11 @@ jobs:
           sudo apt-get install -y \
           libffi-dev zlib1g-dev libsodium-dev gettext libsqlite3-dev
 
-      - name: Set up Python 3.8
+      - name: Set up Python ${{ matrix.cln.python-version }}
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: 3.8
+          python-version: ${{ matrix.cln.python-version }}
 
       - name: Install rust
         if: steps.cache.outputs.cache-hit != 'true'
@@ -153,7 +163,18 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: ${{ (steps.cache.outputs.cache-hit != 'true') &&  (matrix.cln.python-version != '3.8') }}
+        run: |
+          set -e
+          pip3 install --user pip wheel poetry mako
+          poetry install --no-root
+          ./configure --enable-rust
+          poetry run make -j $(nproc)
+          mkdir inst
+          make install DESTDIR=inst/
+
+      - name: Build
+        if: ${{ (steps.cache.outputs.cache-hit != 'true') &&  (matrix.cln.python-version == '3.8') }}
         run: |
           set -e
           pip3 install --user pip wheel poetry
@@ -219,7 +240,7 @@ jobs:
     strategy:
       matrix:
         cln-version:
-          - v25.02.1
+          - v25.05
         bitcoind-version:
           - '22.1'
           - '23.2'
@@ -291,6 +312,7 @@ jobs:
     strategy:
       matrix:
         cln-version:
+          - v25.05
           - v25.02.1
           - v24.11.2
           - v24.08
@@ -360,7 +382,7 @@ jobs:
       matrix:
         test:
           - lnd-version: jssdwt-v0.18.3-with-ca
-            cln-version: v25.02.1
+            cln-version: v25.05
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -441,7 +463,6 @@ jobs:
           rustup toolchain install stable --profile minimal
 
       - name: Install Protoc
-        if: steps.cache.outputs.cache-hit != 'true'
         uses: arduino/setup-protoc@v3
         with:
           version: "27.4"
