@@ -29,7 +29,7 @@ use super::{
 
 pub struct ClientConnection {
     pub address: Uri,
-    pub ca_cert: Certificate,
+    pub ca_cert: Option<Certificate>,
     pub macaroon: String,
 }
 
@@ -40,7 +40,7 @@ where
 {
     pub(super) network: Network,
     address: Uri,
-    tls_config: ClientTlsConfig,
+    tls_config: Option<ClientTlsConfig>,
     macaroon: MetadataValue<Ascii>,
     repository: Arc<R>,
 }
@@ -80,7 +80,9 @@ where
         network: Network,
         repository: Arc<R>,
     ) -> Result<Self, String> {
-        let tls_config = ClientTlsConfig::new().ca_certificate(connection.ca_cert);
+        let tls_config = connection
+            .ca_cert
+            .map(|cert| ClientTlsConfig::new().ca_certificate(cert));
         Ok(Self {
             address: connection.address,
             network,
@@ -94,11 +96,12 @@ where
     }
 
     async fn get_channel(&self) -> Result<Channel, GetClientError> {
-        let channel = match Channel::builder(self.address.clone())
-            .tls_config(self.tls_config.clone())?
-            .connect()
-            .await
-        {
+        let channel_builder = Channel::builder(self.address.clone());
+        let channel_builder = match &self.tls_config {
+            Some(tls_config) => channel_builder.tls_config(tls_config.clone())?,
+            None => channel_builder,
+        };
+        let channel = match channel_builder.connect().await {
             Ok(channel) => channel,
             Err(e) => {
                 error!("failed to connect to lnd: {:?}", e);

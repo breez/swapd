@@ -342,20 +342,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_with_client(cln_client, pgpool, args).await?;
         }
         (None, Some(lnd_grpc_address)) => {
-            let lnd_grpc_ca_cert = match &args.lnd_grpc_ca_cert {
-                Some(c) => c,
-                None => Err("missing required arg lnd_grpc_tls_cert")?,
+            let ca_cert = match (lnd_grpc_address.scheme_str(), &args.lnd_grpc_ca_cert) {
+                (Some("https"), None) => Err("missing required arg lnd_grpc_ca_cert")?,
+                (_, Some(c)) => Some(Certificate::from_pem(c.resolve().await)),
+                (_, None) => None,
             };
             let lnd_grpc_macaroon = match &args.lnd_grpc_macaroon {
                 Some(c) => c,
                 None => Err("missing required arg lnd_grpc_macaroon")?,
             };
-            let lnd_ca_cert = lnd_grpc_ca_cert.resolve().await;
             let lnd_macaroon = lnd_grpc_macaroon.resolve().await;
             let lnd_conn = lnd::ClientConnection {
                 address: lnd_grpc_address.clone(),
                 macaroon: lnd_macaroon,
-                ca_cert: Certificate::from_pem(lnd_ca_cert),
+                ca_cert,
             };
             let lnd_repository = Arc::new(LndRepository::new(Arc::clone(&pgpool)));
             let lnd_client = Arc::new(lnd::Client::new(lnd_conn, args.network, lnd_repository)?);
