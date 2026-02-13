@@ -7,6 +7,7 @@ pub use repository::{Repository, RepositoryError};
 
 pub mod lnrpc {
     #![allow(clippy::all)]
+    #![allow(dead_code)]
     tonic::include_proto!("lnrpc");
 }
 

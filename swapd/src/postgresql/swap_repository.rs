@@ -17,9 +17,9 @@ use tracing::instrument;
 use crate::{
     lightning::PaymentResult,
     swap::{
-        AddPaymentResultError, GetPaidUtxosError, GetPaymentAttemptsError, GetSwapsError,
-        LockSwapError, PaidOutpoint, PaymentAttempt, PaymentAttemptWithResult, Swap, SwapLock,
-        SwapPersistenceError, SwapPrivateData, SwapPublicData, SwapState, SwapStatePaidOutpoints,
+        GetPaymentAttemptsError, GetSwapsError, LockSwapError, PaidOutpoint, PaymentAttempt,
+        PaymentAttemptWithResult, Swap, SwapLock, SwapPersistenceError, SwapPrivateData,
+        SwapPublicData, SwapState, SwapStatePaidOutpoints,
     },
 };
 
@@ -699,18 +699,6 @@ impl From<bitcoin::secp256k1::Error> for GetSwapsError {
     }
 }
 
-impl From<sqlx::Error> for AddPaymentResultError {
-    fn from(value: sqlx::Error) -> Self {
-        AddPaymentResultError::General(Box::new(value))
-    }
-}
-
-impl From<sqlx::Error> for GetPaidUtxosError {
-    fn from(value: sqlx::Error) -> Self {
-        GetPaidUtxosError::General(Box::new(value))
-    }
-}
-
 impl From<sqlx::Error> for LockSwapError {
     fn from(value: sqlx::Error) -> Self {
         LockSwapError::General(Box::new(value))
@@ -720,12 +708,6 @@ impl From<sqlx::Error> for LockSwapError {
 impl From<SystemTimeError> for LockSwapError {
     fn from(value: SystemTimeError) -> Self {
         LockSwapError::General(Box::new(value))
-    }
-}
-
-impl From<bitcoin::hashes::hex::HexToArrayError> for GetPaidUtxosError {
-    fn from(value: bitcoin::hashes::hex::HexToArrayError) -> Self {
-        GetPaidUtxosError::General(Box::new(value))
     }
 }
 

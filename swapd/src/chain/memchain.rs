@@ -145,11 +145,11 @@ impl Chain {
         Ok(())
     }
 
-    pub(super) fn iter_forwards(&self) -> ForwardChainIterator {
+    pub(super) fn iter_forwards(&self) -> ForwardChainIterator<'_> {
         ForwardChainIterator::new(self)
     }
 
-    pub(super) fn iter_backwards(&self) -> BackwardChainIterator {
+    pub(super) fn iter_backwards(&self) -> BackwardChainIterator<'_> {
         BackwardChainIterator::new(self)
     }
 

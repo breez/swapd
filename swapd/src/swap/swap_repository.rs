@@ -14,23 +14,11 @@ pub enum SwapPersistenceError {
 }
 
 #[derive(Debug, Error)]
-pub enum AddPaymentResultError {
-    #[error("{0}")]
-    General(Box<dyn std::error::Error + Sync + Send>),
-}
-
-#[derive(Debug, Error)]
 pub enum LockSwapError {
     #[error("already locked")]
     AlreadyLocked,
     #[error("swap not found")]
     SwapNotFound,
-    #[error("{0}")]
-    General(Box<dyn std::error::Error + Sync + Send>),
-}
-
-#[derive(Debug, Error)]
-pub enum GetPaidUtxosError {
     #[error("{0}")]
     General(Box<dyn std::error::Error + Sync + Send>),
 }
